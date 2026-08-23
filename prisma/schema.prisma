@@ -1,0 +1,165 @@
+// Schéma de la base de données - SaaS de pronostics football
+// PostgreSQL via Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- UTILISATEURS & ABONNEMENTS ----------
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  passwordHash   String?
+  name           String?
+  createdAt      DateTime  @default(now())
+
+  // Statut d'abonnement (Stripe OU Wave OU Orange Money — voir Payment ci-dessous)
+  stripeCustomerId       String?   @unique
+  stripeSubscriptionId   String?   @unique
+  subscriptionStatus     String?   // active, trialing, canceled, past_due
+  subscriptionPlan       String?   // free, pro
+  currentPeriodEnd       DateTime? // date d'expiration de l'accès Pro (peu importe le moyen de paiement)
+
+  favorites      FavoriteTeam[]
+  predictionViews PredictionView[]
+  payments        Payment[]
+  isAdmin         Boolean  @default(false) // permet de confirmer manuellement les paiements Wave/Orange Money
+}
+
+// Historique des paiements, quel que soit le moyen utilisé.
+// Wave et Orange Money sont ici gérés en mode "manuel" (pas d'API marchand) :
+// l'utilisateur paie sur ton numéro/lien personnel, indique un code de référence,
+// puis un paiement réussi (confirmé par toi via /admin/payments) prolonge
+// `currentPeriodEnd` de 30 jours sur le User.
+model Payment {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+
+  provider       String   // stripe, wave, orange_money
+  reference      String   @unique // code que l'utilisateur indique dans la note du virement
+  amount         Int      // montant en francs CFA (XOF), sans décimales
+  currency       String   @default("XOF")
+  status         String   @default("pending_verification") // pending_verification, success, rejected
+  createdAt      DateTime @default(now())
+  paidAt         DateTime?
+  confirmedBy    String?  // id de l'admin qui a validé le paiement
+}
+
+model FavoriteTeam {
+  id       String @id @default(cuid())
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamId   String
+  team     Team   @relation(fields: [teamId], references: [id])
+
+  @@unique([userId, teamId])
+}
+
+// ---------- DONNÉES FOOTBALL ----------
+
+model League {
+  id           String  @id @default(cuid())
+  externalId   Int     @unique // id chez API-Football
+  name         String
+  country      String
+  season       Int
+  logoUrl      String?
+
+  teams        Team[]
+  matches      Match[]
+}
+
+model Team {
+  id           String  @id @default(cuid())
+  externalId   Int     @unique
+  name         String
+  logoUrl      String?
+
+  leagueId     String?
+  league       League? @relation(fields: [leagueId], references: [id])
+
+  homeMatches  Match[] @relation("HomeTeam")
+  awayMatches  Match[] @relation("AwayTeam")
+  stats        TeamStat[]
+  favoritedBy  FavoriteTeam[]
+}
+
+// Stats agrégées par équipe, utilisées pour nourrir le modèle de prédiction
+model TeamStat {
+  id                String   @id @default(cuid())
+  teamId            String
+  team              Team     @relation(fields: [teamId], references: [id])
+  season            Int
+
+  goalsScoredAvgHome   Float  // moyenne de buts marqués à domicile
+  goalsConcededAvgHome Float
+  goalsScoredAvgAway   Float  // moyenne de buts marqués à l'extérieur
+  goalsConcededAvgAway Float
+  matchesPlayed        Int
+  updatedAt            DateTime @updatedAt
+
+  @@unique([teamId, season])
+}
+
+model Match {
+  id           String    @id @default(cuid())
+  externalId   Int       @unique
+  leagueId     String
+  league       League    @relation(fields: [leagueId], references: [id])
+
+  homeTeamId   String
+  homeTeam     Team      @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  awayTeamId   String
+  awayTeam     Team      @relation("AwayTeam", fields: [awayTeamId], references: [id])
+
+  kickoffAt    DateTime
+  status       String    // scheduled, live, finished, postponed
+  homeScore    Int?
+  awayScore    Int?
+
+  prediction   Prediction?
+  views        PredictionView[]
+
+  @@index([kickoffAt])
+}
+
+// ---------- PRÉDICTIONS ----------
+
+model Prediction {
+  id                String   @id @default(cuid())
+  matchId           String   @unique
+  match             Match    @relation(fields: [matchId], references: [id])
+
+  // Score exact le plus probable
+  predictedHomeGoals Int
+  predictedAwayGoals Int
+  exactScoreProb     Float   // probabilité du score exact prédit
+
+  // Probabilités 1N2
+  homeWinProb        Float
+  drawProb           Float
+  awayWinProb         Float
+
+  // Distribution complète des scores probables (JSON), ex: [{score:"2-1", prob:0.12}, ...]
+  scoreDistribution  Json
+
+  modelVersion       String
+  generatedAt        DateTime @default(now())
+}
+
+// Historique de consultation (utile pour analytics + quota du plan gratuit)
+model PredictionView {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  matchId    String
+  match      Match    @relation(fields: [matchId], references: [id])
+  viewedAt   DateTime @default(now())
+}
