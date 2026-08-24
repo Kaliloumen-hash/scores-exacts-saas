@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import Stripe from "stripe";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+export const dynamic = "force-dynamic";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "", {
   apiVersion: "2024-06-20",
