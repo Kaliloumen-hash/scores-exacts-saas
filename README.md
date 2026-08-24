@@ -82,6 +82,7 @@ Vercel ajoute automatiquement le header `Authorization: Bearer <CRON_SECRET>` à
 à condition que la variable d'environnement `CRON_SECRET` soit bien configurée sur Vercel.
 
 ## Prochaines étapes suggérées
+Mise à jour finale
 
 - Affiner le modèle de prédiction (Poisson bivarié, ou passer à XGBoost avec plus de features :
   forme récente, blessures, historique face-à-face)
