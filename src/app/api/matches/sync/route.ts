@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { fetchFixturesByDate, fetchTeamStatistics, parseTeamAverages } from "@/lib/footballApi";
 import { predictMatch } from "@/lib/prediction";
+export const dynamic = "force-dynamic";
 
 /**
  * Endpoint appelé par un cron job (ex: Vercel Cron, toutes les heures) pour :
