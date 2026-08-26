@@ -1,5 +1,6 @@
 /**
  * Client pour API-Football / API-Sports
+ *
  * Documentation :
  * https://www.api-football.com/documentation-v3
  *
@@ -47,9 +48,11 @@ async function fetchJson(url: string) {
  * @param date Format YYYY-MM-DD
  */
 export async function fetchFixturesByDate(date: string) {
-  const data = await fetchJson(
-    `${BASE_URL}/fixtures?date=${encodeURIComponent(date)}`
-  );
+  const url = new URL(`${BASE_URL}/fixtures`);
+
+  url.searchParams.set("date", date);
+
+  const data = await fetchJson(url.toString());
 
   return (data.response ?? []) as any[];
 }
@@ -64,11 +67,12 @@ export async function fetchFixturesByDateRange(
   fromDate: string,
   toDate: string
 ) {
-  const data = await fetchJson(
-    `${BASE_URL}/fixtures?from=${encodeURIComponent(
-      fromDate
-    )}&to=${encodeURIComponent(toDate)}`
-  );
+  const url = new URL(`${BASE_URL}/fixtures`);
+
+  url.searchParams.set("from", fromDate);
+  url.searchParams.set("to", toDate);
+
+  const data = await fetchJson(url.toString());
 
   return (data.response ?? []) as any[];
 }
@@ -80,9 +84,12 @@ export async function fetchLeagueStandings(
   leagueId: number,
   season: number
 ) {
-  const data = await fetchJson(
-    `${BASE_URL}/standings?league=${leagueId}&season=${season}`
-  );
+  const url = new URL(`${BASE_URL}/standings`);
+
+  url.searchParams.set("league", String(leagueId));
+  url.searchParams.set("season", String(season));
+
+  const data = await fetchJson(url.toString());
 
   return (data.response ?? []) as any[];
 }
@@ -95,9 +102,13 @@ export async function fetchTeamStatistics(
   leagueId: number,
   season: number
 ) {
-  const data = await fetchJson(
-    `${BASE_URL}/teams/statistics?team=${teamId}&league=${leagueId}&season=${season}`
-  );
+  const url = new URL(`${BASE_URL}/teams/statistics`);
+
+  url.searchParams.set("team", String(teamId));
+  url.searchParams.set("league", String(leagueId));
+  url.searchParams.set("season", String(season));
+
+  const data = await fetchJson(url.toString());
 
   return data.response;
 }
