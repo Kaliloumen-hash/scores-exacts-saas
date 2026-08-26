@@ -1,100 +1,150 @@
 import { NextRequest, NextResponse } from "next/server";
+
 import { prisma } from "@/lib/prisma";
+
 import {
   fetchFixturesByDateRange,
   fetchTeamStatistics,
   parseTeamAverages,
 } from "@/lib/footballApi";
+
 import { predictMatch } from "@/lib/prediction";
 
 export const dynamic = "force-dynamic";
+
 export const maxDuration = 300;
 
-async function syncMatches(req: NextRequest) {
+async function syncMatches(
+  req: NextRequest
+) {
   const startTime = Date.now();
 
-  console.log("====================================");
-  console.log("🚀 DÉBUT SYNCHRONISATION");
-  console.log("====================================");
+  console.log(
+    "===================================="
+  );
+
+  console.log(
+    "🚀 DÉBUT SYNCHRONISATION"
+  );
+
+  console.log(
+    "===================================="
+  );
 
   try {
+
     // ========================================
-    // 1. VÉRIFICATION CRON_SECRET
+    // 1. CRON SECRET
     // ========================================
 
-    console.log("🔐 Vérification CRON_SECRET...");
+    console.log(
+      "🔐 Vérification CRON_SECRET..."
+    );
 
-    const authHeader = req.headers.get("authorization");
+    const authHeader =
+      req.headers.get(
+        "authorization"
+      );
 
     if (
       !process.env.CRON_SECRET ||
-      authHeader !== `Bearer ${process.env.CRON_SECRET}`
+      authHeader !==
+        `Bearer ${process.env.CRON_SECRET}`
     ) {
-      console.error("❌ Accès non autorisé");
+      console.error(
+        "❌ Accès non autorisé"
+      );
 
       return NextResponse.json(
         {
           ok: false,
           error: "Non autorisé",
         },
-        { status: 401 }
+        {
+          status: 401,
+        }
       );
     }
 
-    console.log("✅ CRON_SECRET valide");
+    console.log(
+      "✅ CRON_SECRET valide"
+    );
 
     // ========================================
-    // 2. CALCUL DES DATES
+    // 2. DATES
     // ========================================
 
     const today = new Date();
 
-    const fromDateObject = new Date(today);
+    const fromDateObject =
+      new Date(today);
+
     fromDateObject.setUTCDate(
       fromDateObject.getUTCDate() - 1
     );
 
-    const toDateObject = new Date(today);
+    const toDateObject =
+      new Date(today);
+
     toDateObject.setUTCDate(
       toDateObject.getUTCDate() + 1
     );
 
-    const fromDate = fromDateObject
-      .toISOString()
-      .slice(0, 10);
+    const fromDate =
+      fromDateObject
+        .toISOString()
+        .slice(0, 10);
 
-    const toDate = toDateObject
-      .toISOString()
-      .slice(0, 10);
+    const toDate =
+      toDateObject
+        .toISOString()
+        .slice(0, 10);
 
-    console.log("====================================");
-    console.log("📅 PÉRIODE");
-    console.log(`📅 Du : ${fromDate}`);
-    console.log(`📅 Au : ${toDate}`);
-    console.log("====================================");
+    console.log(
+      "===================================="
+    );
+
+    console.log(
+      `📅 DU : ${fromDate}`
+    );
+
+    console.log(
+      `📅 AU : ${toDate}`
+    );
+
+    console.log(
+      "===================================="
+    );
 
     // ========================================
-    // 3. RÉCUPÉRATION API-FOOTBALL
+    // 3. API-FOOTBALL
     // ========================================
 
-    console.log("🌐 Connexion à API-Football...");
+    console.log(
+      "🌐 Connexion API-Football..."
+    );
 
     let fixtures: any[] = [];
 
     try {
-      fixtures = await fetchFixturesByDateRange(
-        fromDate,
-        toDate
-      );
+
+      fixtures =
+        await fetchFixturesByDateRange(
+          fromDate,
+          toDate
+        );
 
       console.log(
-        `✅ API-Football a retourné ${fixtures.length} match(s)`
+        `✅ ${fixtures.length} match(s) récupéré(s)`
       );
+
     } catch (error) {
+
       console.error(
-        "❌ ERREUR API-FOOTBALL :",
-        error
+        "❌ ERREUR API-FOOTBALL"
       );
+
+      console.error(error);
 
       throw error;
     }
@@ -104,43 +154,53 @@ async function syncMatches(req: NextRequest) {
     // ========================================
 
     let matchesCreated = 0;
+
     let matchesUpdated = 0;
+
     let predictionsGenerated = 0;
+
     let predictionErrors = 0;
+
     let skippedFixtures = 0;
+
     let nonNsMatches = 0;
+
     let statisticsErrors = 0;
 
     // ========================================
-    // 5. SI AUCUN MATCH
+    // 5. MATCHS
     // ========================================
 
-    if (fixtures.length === 0) {
-      console.warn(
-        "⚠️ Aucun match récupéré par API-Football"
-      );
-    }
+    console.log(
+      "===================================="
+    );
 
-    // ========================================
-    // 6. TRAITEMENT DES MATCHS
-    // ========================================
+    console.log(
+      "⚽ DÉBUT TRAITEMENT MATCHS"
+    );
 
-    console.log("====================================");
-    console.log("⚽ DÉBUT TRAITEMENT DES MATCHS");
-    console.log("====================================");
+    console.log(
+      "===================================="
+    );
 
-    for (let index = 0; index < fixtures.length; index++) {
-      const fixture = fixtures[index];
+    for (
+      let index = 0;
+      index < fixtures.length;
+      index++
+    ) {
 
-      console.log("------------------------------------");
-      console.log(
-        `⚽ MATCH ${index + 1}/${fixtures.length}`
-      );
+      const fixture =
+        fixtures[index];
+
+      let homeName = "Inconnu";
+
+      let awayName = "Inconnu";
 
       try {
-        // ========================================
-        // 6.1 VÉRIFICATION DONNÉES
-        // ========================================
+
+        // ====================================
+        // 5.1 VALIDATION
+        // ====================================
 
         if (
           !fixture?.fixture?.id ||
@@ -148,6 +208,7 @@ async function syncMatches(req: NextRequest) {
           !fixture?.teams?.home?.id ||
           !fixture?.teams?.away?.id
         ) {
+
           console.warn(
             "⚠️ Match ignoré : données incomplètes"
           );
@@ -157,12 +218,13 @@ async function syncMatches(req: NextRequest) {
           continue;
         }
 
-        const fixtureId = fixture.fixture.id;
+        const fixtureId =
+          fixture.fixture.id;
 
-        const homeName =
+        homeName =
           fixture.teams.home.name;
 
-        const awayName =
+        awayName =
           fixture.teams.away.name;
 
         const leagueName =
@@ -171,221 +233,294 @@ async function syncMatches(req: NextRequest) {
         const status =
           fixture.fixture.status.short;
 
-        console.log(`🆔 Fixture ID : ${fixtureId}`);
+        console.log(
+          "------------------------------------"
+        );
+
+        console.log(
+          `⚽ MATCH ${index + 1}/${fixtures.length}`
+        );
+
+        console.log(
+          `🆔 Fixture : ${fixtureId}`
+        );
+
         console.log(
           `🏆 Ligue : ${leagueName}`
         );
-        console.log(
-          `🏠 Domicile : ${homeName}`
-        );
-        console.log(
-          `✈️ Extérieur : ${awayName}`
-        );
-        console.log(`📊 Statut : ${status}`);
-
-        // ========================================
-        // 6.2 LIGUE
-        // ========================================
-
-        console.log("🏆 Enregistrement de la ligue...");
-
-        const league = await prisma.league.upsert({
-          where: {
-            externalId: fixture.league.id,
-          },
-          update: {
-            name: fixture.league.name,
-            country: fixture.league.country,
-            season: fixture.league.season,
-            logoUrl: fixture.league.logo,
-          },
-          create: {
-            externalId: fixture.league.id,
-            name: fixture.league.name,
-            country: fixture.league.country,
-            season: fixture.league.season,
-            logoUrl: fixture.league.logo,
-          },
-        });
 
         console.log(
-          `✅ Ligue enregistrée : ${league.name}`
+          `🏠 ${homeName}`
         );
-
-        // ========================================
-        // 6.3 ÉQUIPE DOMICILE
-        // ========================================
 
         console.log(
-          `🏠 Enregistrement équipe : ${homeName}`
+          `✈️ ${awayName}`
         );
-
-        const homeTeam = await prisma.team.upsert({
-          where: {
-            externalId: fixture.teams.home.id,
-          },
-          update: {
-            name: fixture.teams.home.name,
-            logoUrl: fixture.teams.home.logo,
-            leagueId: league.id,
-          },
-          create: {
-            externalId: fixture.teams.home.id,
-            name: fixture.teams.home.name,
-            logoUrl: fixture.teams.home.logo,
-            leagueId: league.id,
-          },
-        });
 
         console.log(
-          `✅ Équipe domicile enregistrée : ${homeTeam.name}`
+          `📊 Statut : ${status}`
         );
 
-        // ========================================
-        // 6.4 ÉQUIPE EXTÉRIEURE
-        // ========================================
+        // ====================================
+        // 5.2 LIGUE
+        // ====================================
 
-        console.log(
-          `✈️ Enregistrement équipe : ${awayName}`
-        );
+        const league =
+          await prisma.league.upsert({
 
-        const awayTeam = await prisma.team.upsert({
-          where: {
-            externalId: fixture.teams.away.id,
-          },
-          update: {
-            name: fixture.teams.away.name,
-            logoUrl: fixture.teams.away.logo,
-            leagueId: league.id,
-          },
-          create: {
-            externalId: fixture.teams.away.id,
-            name: fixture.teams.away.name,
-            logoUrl: fixture.teams.away.logo,
-            leagueId: league.id,
-          },
-        });
+            where: {
+              externalId:
+                fixture.league.id,
+            },
 
-        console.log(
-          `✅ Équipe extérieure enregistrée : ${awayTeam.name}`
-        );
+            update: {
+              name:
+                fixture.league.name,
 
-        // ========================================
-        // 6.5 MATCH
-        // ========================================
+              country:
+                fixture.league.country,
 
-        console.log("⚽ Enregistrement du match...");
+              season:
+                fixture.league.season,
+
+              logoUrl:
+                fixture.league.logo,
+            },
+
+            create: {
+              externalId:
+                fixture.league.id,
+
+              name:
+                fixture.league.name,
+
+              country:
+                fixture.league.country,
+
+              season:
+                fixture.league.season,
+
+              logoUrl:
+                fixture.league.logo,
+            },
+          });
+
+        // ====================================
+        // 5.3 DOMICILE
+        // ====================================
+
+        const homeTeam =
+          await prisma.team.upsert({
+
+            where: {
+              externalId:
+                fixture.teams.home.id,
+            },
+
+            update: {
+              name:
+                fixture.teams.home.name,
+
+              logoUrl:
+                fixture.teams.home.logo,
+
+              leagueId:
+                league.id,
+            },
+
+            create: {
+              externalId:
+                fixture.teams.home.id,
+
+              name:
+                fixture.teams.home.name,
+
+              logoUrl:
+                fixture.teams.home.logo,
+
+              leagueId:
+                league.id,
+            },
+          });
+
+        // ====================================
+        // 5.4 EXTÉRIEUR
+        // ====================================
+
+        const awayTeam =
+          await prisma.team.upsert({
+
+            where: {
+              externalId:
+                fixture.teams.away.id,
+            },
+
+            update: {
+              name:
+                fixture.teams.away.name,
+
+              logoUrl:
+                fixture.teams.away.logo,
+
+              leagueId:
+                league.id,
+            },
+
+            create: {
+              externalId:
+                fixture.teams.away.id,
+
+              name:
+                fixture.teams.away.name,
+
+              logoUrl:
+                fixture.teams.away.logo,
+
+              leagueId:
+                league.id,
+            },
+          });
+
+        // ====================================
+        // 5.5 MATCH
+        // ====================================
 
         const existingMatch =
           await prisma.match.findUnique({
+
             where: {
               externalId: fixtureId,
             },
+
             select: {
               id: true,
             },
           });
 
-        const match = await prisma.match.upsert({
-          where: {
-            externalId: fixtureId,
-          },
-          update: {
-            status: status,
-            kickoffAt: new Date(
-              fixture.fixture.date
-            ),
-            leagueId: league.id,
-            homeTeamId: homeTeam.id,
-            awayTeamId: awayTeam.id,
-          },
-          create: {
-            externalId: fixtureId,
-            leagueId: league.id,
-            homeTeamId: homeTeam.id,
-            awayTeamId: awayTeam.id,
-            kickoffAt: new Date(
-              fixture.fixture.date
-            ),
-            status: status,
-          },
-        });
+        const match =
+          await prisma.match.upsert({
+
+            where: {
+              externalId: fixtureId,
+            },
+
+            update: {
+
+              status,
+
+              kickoffAt:
+                new Date(
+                  fixture.fixture.date
+                ),
+
+              leagueId:
+                league.id,
+
+              homeTeamId:
+                homeTeam.id,
+
+              awayTeamId:
+                awayTeam.id,
+            },
+
+            create: {
+
+              externalId:
+                fixtureId,
+
+              leagueId:
+                league.id,
+
+              homeTeamId:
+                homeTeam.id,
+
+              awayTeamId:
+                awayTeam.id,
+
+              kickoffAt:
+                new Date(
+                  fixture.fixture.date
+                ),
+
+              status,
+            },
+          });
 
         if (existingMatch) {
+
           matchesUpdated++;
 
           console.log(
-            `🔄 Match mis à jour : ${homeName} - ${awayName}`
+            "🔄 Match mis à jour"
           );
+
         } else {
+
           matchesCreated++;
 
           console.log(
-            `🆕 Match créé : ${homeName} - ${awayName}`
+            "🆕 Match créé"
           );
         }
 
-        console.log(
-          `📌 Match enregistré : ${homeName} - ${awayName}`
-        );
-
-        // ========================================
-        // 6.6 VÉRIFICATION STATUT
-        // ========================================
-
-        console.log(
-          `🔎 Vérification du statut pour la prédiction : ${status}`
-        );
+        // ====================================
+        // 5.6 STATUT
+        // ====================================
 
         if (status !== "NS") {
+
           nonNsMatches++;
 
           console.log(
-            `⏭️ PRÉDICTION NON LANCÉE`
-          );
-
-          console.log(
-            `⏭️ ${homeName} - ${awayName}`
-          );
-
-          console.log(
-            `⏭️ Raison : statut = ${status}, attendu = NS`
+            `⏭️ Pas de prédiction : statut ${status}`
           );
 
           continue;
         }
 
-        // ========================================
-        // 6.7 DÉBUT PRÉDICTION
-        // ========================================
+        // ====================================
+        // 5.7 PRÉDICTION
+        // ====================================
 
-        console.log("====================================");
-        console.log("🤖 DÉBUT PRÉDICTION");
+        console.log(
+          "===================================="
+        );
+
+        console.log(
+          "🤖 DÉBUT PRÉDICTION"
+        );
+
         console.log(
           `🤖 ${homeName} - ${awayName}`
         );
-        console.log("====================================");
 
-        let homeStatsRaw;
-        let awayStatsRaw;
+        console.log(
+          "===================================="
+        );
 
-        // ========================================
-        // 6.8 RÉCUPÉRATION STATISTIQUES
-        // ========================================
+        // ====================================
+        // 5.8 STATISTIQUES
+        // ====================================
+
+        let homeStatsRaw: any;
+
+        let awayStatsRaw: any;
 
         try {
+
           console.log(
-            `📊 Récupération statistiques : ${homeName}`
+            `📊 Stats domicile : ${homeName}`
           );
 
           console.log(
-            `📊 Récupération statistiques : ${awayName}`
+            `📊 Stats extérieur : ${awayName}`
           );
 
           [
             homeStatsRaw,
             awayStatsRaw,
           ] = await Promise.all([
+
             fetchTeamStatistics(
               fixture.teams.home.id,
               fixture.league.id,
@@ -400,17 +535,19 @@ async function syncMatches(req: NextRequest) {
           ]);
 
           console.log(
-            `✅ Statistiques récupérées : ${homeName}`
+            "✅ Statistiques récupérées"
           );
 
-          console.log(
-            `✅ Statistiques récupérées : ${awayName}`
-          );
         } catch (error) {
+
           statisticsErrors++;
 
           console.error(
-            `❌ ERREUR STATISTIQUES : ${homeName} - ${awayName}`
+            "❌ ERREUR STATISTIQUES"
+          );
+
+          console.error(
+            `⚽ ${homeName} - ${awayName}`
           );
 
           console.error(error);
@@ -418,79 +555,74 @@ async function syncMatches(req: NextRequest) {
           continue;
         }
 
-        // ========================================
-        // 6.9 VÉRIFICATION STATISTIQUES
-        // ========================================
+        // ====================================
+        // 5.9 CONVERSION
+        // ====================================
 
-        if (!homeStatsRaw || !awayStatsRaw) {
+        let homeStats;
+
+        let awayStats;
+
+        try {
+
+          homeStats =
+            parseTeamAverages(
+              homeStatsRaw
+            );
+
+          awayStats =
+            parseTeamAverages(
+              awayStatsRaw
+            );
+
+        } catch (error) {
+
           statisticsErrors++;
 
-          console.warn(
-            `⚠️ Statistiques indisponibles : ${homeName} - ${awayName}`
+          console.error(
+            "❌ ERREUR CONVERSION STATS"
           );
+
+          console.error(error);
 
           continue;
         }
 
         console.log(
-          "✅ Statistiques disponibles pour la prédiction"
-        );
-
-        // ========================================
-        // 6.10 CONVERSION STATISTIQUES
-        // ========================================
-
-        console.log(
-          "📈 Conversion des statistiques..."
-        );
-
-        const homeStats =
-          parseTeamAverages(homeStatsRaw);
-
-        const awayStats =
-          parseTeamAverages(awayStatsRaw);
-
-        console.log(
-          "✅ Statistiques converties"
-        );
-
-        console.log(
-          "🏠 Stats domicile :",
+          "📈 Stats domicile :",
           homeStats
         );
 
         console.log(
-          "✈️ Stats extérieur :",
+          "📈 Stats extérieur :",
           awayStats
         );
 
-        // ========================================
-        // 6.11 MOYENNES LIGUE
-        // ========================================
+        // ====================================
+        // 5.10 MOYENNES LIGUE
+        // ====================================
 
         const leagueAverages = {
+
           avgGoalsHome: 1.4,
+
           avgGoalsAway: 1.1,
         };
 
-        console.log(
-          "📊 Moyennes ligue :",
-          leagueAverages
-        );
-
-        // ========================================
-        // 6.12 CALCUL PRÉDICTION
-        // ========================================
+        // ====================================
+        // 5.11 CALCUL
+        // ====================================
 
         console.log(
-          "🧠 Calcul de la prédiction..."
+          "🧠 Calcul prédiction..."
         );
 
-        const result = predictMatch(
-          homeStats,
-          awayStats,
-          leagueAverages
-        );
+        const result =
+          predictMatch(
+            homeStats,
+            awayStats,
+            leagueAverages
+          );
 
         console.log(
           "✅ Prédiction calculée"
@@ -501,19 +633,23 @@ async function syncMatches(req: NextRequest) {
           result
         );
 
-        // ========================================
-        // 6.13 ENREGISTREMENT PRÉDICTION
-        // ========================================
+        // ====================================
+        // 5.12 PRISMA
+        // ====================================
 
         console.log(
-          "💾 Enregistrement de la prédiction dans Prisma..."
+          "💾 Enregistrement prédiction..."
         );
 
         await prisma.prediction.upsert({
+
           where: {
-            matchId: match.id,
+            matchId:
+              match.id,
           },
+
           update: {
+
             predictedHomeGoals:
               result.predictedHomeGoals,
 
@@ -535,11 +671,14 @@ async function syncMatches(req: NextRequest) {
             scoreDistribution:
               result.scoreDistribution,
 
-            modelVersion: "poisson-v1",
+            modelVersion:
+              "poisson-v1",
           },
 
           create: {
-            matchId: match.id,
+
+            matchId:
+              match.id,
 
             predictedHomeGoals:
               result.predictedHomeGoals,
@@ -562,43 +701,86 @@ async function syncMatches(req: NextRequest) {
             scoreDistribution:
               result.scoreDistribution,
 
-            modelVersion: "poisson-v1",
+            modelVersion:
+              "poisson-v1",
           },
         });
 
         predictionsGenerated++;
 
-        console.log("====================================");
-        console.log("✅ PRÉDICTION ENREGISTRÉE");
+        console.log(
+          "===================================="
+        );
+
+        console.log(
+          "✅ PRÉDICTION ENREGISTRÉE"
+        );
+
         console.log(
           `⚽ ${homeName} - ${awayName}`
         );
+
         console.log(
-          `🎯 Score prédit : ${result.predictedHomeGoals} - ${result.predictedAwayGoals}`
+          `🎯 Score : ${result.predictedHomeGoals}-${result.predictedAwayGoals}`
         );
-        console.log("====================================");
+
+        console.log(
+          `🏠 Victoire domicile : ${result.homeWinProb}`
+        );
+
+        console.log(
+          `🤝 Nul : ${result.drawProb}`
+        );
+
+        console.log(
+          `✈️ Victoire extérieur : ${result.awayWinProb}`
+        );
+
+        console.log(
+          "====================================";
+
+        );
+
       } catch (error) {
-        skippedFixtures++;
+
+        predictionErrors++;
 
         console.error(
-          `❌ ERREUR TRAITEMENT MATCH`
+          "❌ ERREUR TRAITEMENT MATCH"
         );
 
-        console.error(error);
+        console.error(
+          `⚽ ${homeName} - ${awayName}`
+        );
+
+        console.error(
+          error instanceof Error
+            ? error.message
+            : error
+        );
       }
     }
 
     // ========================================
-    // 7. RÉSUMÉ FINAL
+    // 6. RÉSUMÉ
     // ========================================
 
     const duration =
       Date.now() - startTime;
 
     console.log("");
-    console.log("====================================");
-    console.log("🏁 SYNCHRONISATION TERMINÉE");
-    console.log("====================================");
+
+    console.log(
+      "===================================="
+    );
+
+    console.log(
+      "🏁 SYNCHRONISATION TERMINÉE"
+    );
+
+    console.log(
+      "===================================="
+    );
 
     console.log(
       `📅 Période : ${fromDate} → ${toDate}`
@@ -617,7 +799,7 @@ async function syncMatches(req: NextRequest) {
     );
 
     console.log(
-      `🤖 Prédictions générées : ${predictionsGenerated}`
+      `🤖 Prédictions : ${predictionsGenerated}`
     );
 
     console.log(
@@ -629,7 +811,7 @@ async function syncMatches(req: NextRequest) {
     );
 
     console.log(
-      `⏭️ Matchs sans prédiction (statut différent de NS) : ${nonNsMatches}`
+      `⏭️ Matchs non NS : ${nonNsMatches}`
     );
 
     console.log(
@@ -640,9 +822,12 @@ async function syncMatches(req: NextRequest) {
       `⏱️ Durée : ${duration} ms`
     );
 
-    console.log("====================================");
+    console.log(
+      "===================================="
+    );
 
     return NextResponse.json({
+
       ok: true,
 
       dateRange: {
@@ -650,7 +835,8 @@ async function syncMatches(req: NextRequest) {
         to: toDate,
       },
 
-      fixturesFound: fixtures.length,
+      fixturesFound:
+        fixtures.length,
 
       matchesCreated,
 
@@ -666,15 +852,25 @@ async function syncMatches(req: NextRequest) {
 
       skippedFixtures,
 
-      durationMs: duration,
+      durationMs:
+        duration,
     });
+
   } catch (error) {
+
     console.error("");
-    console.error("====================================");
+
+    console.error(
+      "===================================="
+    );
+
     console.error(
       "❌ ERREUR GÉNÉRALE /api/matches/sync"
     );
-    console.error("====================================");
+
+    console.error(
+      "===================================="
+    );
 
     console.error(error);
 
@@ -709,7 +905,7 @@ export async function GET(
 }
 
 // ========================================
-// POST — TESTS MANUELS
+// POST — TEST MANUEL
 // ========================================
 
 export async function POST(
