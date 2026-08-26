@@ -1,16 +1,17 @@
 /**
- * Client pour API-Football (via RapidAPI).
- * Doc : https://www.api-football.com/documentation-v3
+ * Client pour API-Football / API-Sports
+ * Documentation :
+ * https://www.api-football.com/documentation-v3
  *
- * Nécessite la variable d'environnement API_FOOTBALL_KEY.
+ * Nécessite la variable d'environnement :
+ * API_FOOTBALL_KEY
  */
 
-const BASE_URL = "https://api-football-v1.p.rapidapi.com/v3";
+const BASE_URL = "https://v3.football.api-sports.io";
 
 function headers() {
   return {
-    "x-rapidapi-host": "api-football-v1.p.rapidapi.com",
-    "x-rapidapi-key": process.env.API_FOOTBALL_KEY ?? "",
+    "x-apisports-key": process.env.API_FOOTBALL_KEY ?? "",
   };
 }
 
@@ -21,12 +22,17 @@ async function fetchJson(url: string) {
   });
 
   if (!res.ok) {
-    throw new Error(`Erreur API-Football: ${res.status} ${res.statusText}`);
+    throw new Error(
+      `Erreur API-Football: ${res.status} ${res.statusText}`
+    );
   }
 
   const data = await res.json();
 
-  if (data.errors && Object.keys(data.errors).length > 0) {
+  if (
+    data.errors &&
+    Object.keys(data.errors).length > 0
+  ) {
     throw new Error(
       `Erreur API-Football: ${JSON.stringify(data.errors)}`
     );
@@ -51,8 +57,6 @@ export async function fetchFixturesByDate(date: string) {
 /**
  * Récupère les matchs d'une période.
  *
- * API-Football accepte les paramètres from/to.
- *
  * @param fromDate Format YYYY-MM-DD
  * @param toDate Format YYYY-MM-DD
  */
@@ -69,6 +73,9 @@ export async function fetchFixturesByDateRange(
   return (data.response ?? []) as any[];
 }
 
+/**
+ * Récupère les classements d'une ligue.
+ */
 export async function fetchLeagueStandings(
   leagueId: number,
   season: number
@@ -80,6 +87,9 @@ export async function fetchLeagueStandings(
   return (data.response ?? []) as any[];
 }
 
+/**
+ * Récupère les statistiques d'une équipe.
+ */
 export async function fetchTeamStatistics(
   teamId: number,
   leagueId: number,
@@ -106,15 +116,19 @@ export function parseTeamAverages(rawStats: any) {
     goalsScoredAvgHome: Number(
       rawStats?.goals?.for?.average?.home ?? 0
     ),
+
     goalsConcededAvgHome: Number(
       rawStats?.goals?.against?.average?.home ?? 0
     ),
+
     goalsScoredAvgAway: Number(
       rawStats?.goals?.for?.average?.away ?? 0
     ),
+
     goalsConcededAvgAway: Number(
       rawStats?.goals?.against?.average?.away ?? 0
     ),
+
     matchesPlayed: homePlayed + awayPlayed,
   };
 }
