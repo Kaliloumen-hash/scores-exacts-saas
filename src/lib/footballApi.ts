@@ -1,32 +1,20 @@
 /**
- * Client pour API-Football / API-Sports
- *
- * Documentation :
- * https://www.api-football.com/documentation-v3
- *
- * Nécessite :
- * API_FOOTBALL_KEY
+ * Client API-Football / API-Sports
  */
 
 const BASE_URL = "https://v3.football.api-sports.io";
 
 function headers() {
   return {
-    "x-apisports-key":
-      process.env.API_FOOTBALL_KEY ?? "",
+    "x-apisports-key": process.env.API_FOOTBALL_KEY ?? "",
     Accept: "application/json",
   };
 }
 
-/**
- * Erreur spécifique lorsqu'une date
- * n'est pas accessible avec le forfait API.
- */
 class ApiFootballDateRestrictionError extends Error {
   constructor(message: string) {
     super(message);
-    this.name =
-      "ApiFootballDateRestrictionError";
+    this.name = "ApiFootballDateRestrictionError";
   }
 }
 
@@ -41,10 +29,6 @@ async function fetchJson(url: string) {
 
   const data = await res.json();
 
-  // ========================================
-  // ERREUR HTTP
-  // ========================================
-
   if (!res.ok) {
     console.error(
       `❌ API-Football HTTP ${res.status}:`,
@@ -56,38 +40,24 @@ async function fetchJson(url: string) {
     );
   }
 
-  // ========================================
-  // ERREURS API-FOOTBALL
-  // ========================================
-
   if (
     data.errors &&
     Object.keys(data.errors).length > 0
   ) {
     const errors = data.errors;
+    const errorText = JSON.stringify(errors);
 
     console.error(
       "❌ Erreurs API-Football:",
-      JSON.stringify(errors)
+      errorText
     );
 
-    const errorText =
-      JSON.stringify(errors);
-
-    // ========================================
-    // LIMITE DE DATE DU FORFAIT
-    // ========================================
+    const lower = errorText.toLowerCase();
 
     if (
-      errorText.includes(
-        "Les forfaits gratuits n’ont pas accès à cette date"
-      ) ||
-      errorText.includes(
-        "Les forfaits gratuits n'ont pas accès à cette date"
-      ) ||
-      errorText.includes(
-        "free plans do not have access to this date"
-      )
+      lower.includes("free plans do not have access to this date") ||
+      lower.includes("les forfaits gratuits n'ont pas accès à cette date") ||
+      lower.includes("les forfaits gratuits n’ont pas accès à cette date")
     ) {
       throw new ApiFootballDateRestrictionError(
         errorText
@@ -103,12 +73,7 @@ async function fetchJson(url: string) {
 }
 
 /**
- * Récupère les matchs d'une date précise.
- *
- * @param date Format YYYY-MM-DD
- *
- * Retourne [] si la date n'est pas accessible
- * avec le forfait API actuel.
+ * Matchs d'une date.
  */
 export async function fetchFixturesByDate(
   date: string
@@ -117,10 +82,7 @@ export async function fetchFixturesByDate(
     `${BASE_URL}/fixtures`
   );
 
-  url.searchParams.set(
-    "date",
-    date
-  );
+  url.searchParams.set("date", date);
 
   try {
     const data = await fetchJson(
@@ -136,43 +98,23 @@ export async function fetchFixturesByDate(
 
     return fixtures;
   } catch (error) {
-    // ========================================
-    // DATE NON ACCESSIBLE AVEC LE FORFAIT
-    // ========================================
-
     if (
       error instanceof
       ApiFootballDateRestrictionError
     ) {
       console.warn(
-        `⚠️ Date ${date} non accessible avec le forfait API actuel.`
-      );
-
-      console.warn(
-        `⏭️ Date ${date} ignorée.`
+        `⚠️ Date ${date} inaccessible avec le forfait actuel.`
       );
 
       return [];
     }
-
-    // ========================================
-    // AUTRE ERREUR
-    // ========================================
 
     throw error;
   }
 }
 
 /**
- * Récupère les matchs sur une période.
- *
- * Cette fonction effectue un appel par jour.
- *
- * Si une date n'est pas accessible avec le
- * forfait API, elle est simplement ignorée.
- *
- * @param fromDate Format YYYY-MM-DD
- * @param toDate Format YYYY-MM-DD
+ * Matchs sur une période.
  */
 export async function fetchFixturesByDateRange(
   fromDate: string,
@@ -194,9 +136,7 @@ export async function fetchFixturesByDateRange(
     )
   ) {
     const date =
-      current
-        .toISOString()
-        .slice(0, 10);
+      current.toISOString().slice(0, 10);
 
     console.log(
       "------------------------------------"
@@ -210,9 +150,7 @@ export async function fetchFixturesByDateRange(
       const dailyFixtures =
         await fetchFixturesByDate(date);
 
-      fixtures.push(
-        ...dailyFixtures
-      );
+      fixtures.push(...dailyFixtures);
 
       console.log(
         `✅ ${date} : ${dailyFixtures.length} match(s)`
@@ -223,7 +161,6 @@ export async function fetchFixturesByDateRange(
         error
       );
 
-      // On continue avec le jour suivant.
       continue;
     }
   }
@@ -237,7 +174,7 @@ export async function fetchFixturesByDateRange(
   );
 
   console.log(
-    `📅 Période demandée : ${fromDate} → ${toDate}`
+    `📅 Période : ${fromDate} → ${toDate}`
   );
 
   console.log(
@@ -248,7 +185,7 @@ export async function fetchFixturesByDateRange(
 }
 
 /**
- * Récupère les classements d'une ligue.
+ * Classement.
  */
 export async function fetchLeagueStandings(
   leagueId: number,
@@ -278,13 +215,19 @@ export async function fetchLeagueStandings(
 }
 
 /**
- * Récupère les statistiques d'une équipe.
+ * Statistiques équipe.
  */
 export async function fetchTeamStatistics(
   teamId: number,
   leagueId: number,
   season: number
 ) {
+  if (!teamId || !leagueId || !season) {
+    throw new Error(
+      "Paramètres statistiques invalides"
+    );
+  }
+
   const url = new URL(
     `${BASE_URL}/teams/statistics`
   );
@@ -308,57 +251,77 @@ export async function fetchTeamStatistics(
     url.toString()
   );
 
+  if (!data.response) {
+    throw new Error(
+      `Aucune statistique disponible pour l'équipe ${teamId}`
+    );
+  }
+
   return data.response;
 }
 
 /**
- * Convertit les statistiques brutes de l'API
- * en moyennes exploitables par le moteur
- * de prédiction.
+ * Conversion statistiques.
  */
 export function parseTeamAverages(
   rawStats: any
 ) {
-  const played =
-    rawStats?.fixtures?.played;
-
-  const homePlayed =
-    Number(
-      played?.home ?? 0
+  if (!rawStats) {
+    throw new Error(
+      "Statistiques équipe absentes"
     );
+  }
 
-  const awayPlayed =
-    Number(
-      played?.away ?? 0
+  const homeScored = Number(
+    rawStats?.goals?.for?.average?.home
+  );
+
+  const homeConceded = Number(
+    rawStats?.goals?.against?.average?.home
+  );
+
+  const awayScored = Number(
+    rawStats?.goals?.for?.average?.away
+  );
+
+  const awayConceded = Number(
+    rawStats?.goals?.against?.average?.away
+  );
+
+  const homePlayed = Number(
+    rawStats?.fixtures?.played?.home ?? 0
+  );
+
+  const awayPlayed = Number(
+    rawStats?.fixtures?.played?.away ?? 0
+  );
+
+  const values = [
+    homeScored,
+    homeConceded,
+    awayScored,
+    awayConceded,
+  ];
+
+  const invalid = values.some(
+    (value) =>
+      !Number.isFinite(value) ||
+      value < 0
+  );
+
+  if (invalid) {
+    throw new Error(
+      "Statistiques insuffisantes ou invalides"
     );
+  }
 
   return {
-    goalsScoredAvgHome:
-      Number(
-        rawStats?.goals?.for
-          ?.average?.home ?? 0
-      ),
-
-    goalsConcededAvgHome:
-      Number(
-        rawStats?.goals?.against
-          ?.average?.home ?? 0
-      ),
-
-    goalsScoredAvgAway:
-      Number(
-        rawStats?.goals?.for
-          ?.average?.away ?? 0
-      ),
-
-    goalsConcededAvgAway:
-      Number(
-        rawStats?.goals?.against
-          ?.average?.away ?? 0
-      ),
+    goalsScoredAvgHome: homeScored,
+    goalsConcededAvgHome: homeConceded,
+    goalsScoredAvgAway: awayScored,
+    goalsConcededAvgAway: awayConceded,
 
     matchesPlayed:
-      homePlayed +
-      awayPlayed,
+      homePlayed + awayPlayed,
   };
 }
