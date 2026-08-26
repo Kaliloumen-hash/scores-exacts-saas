@@ -12,6 +12,10 @@ export const maxDuration = 300;
 
 async function syncMatches(req: NextRequest) {
   try {
+    // =========================
+    // SÉCURITÉ CRON
+    // =========================
+
     const authHeader = req.headers.get("authorization");
 
     if (
@@ -29,23 +33,39 @@ async function syncMatches(req: NextRequest) {
       );
     }
 
-    // Date actuelle
+    // =========================
+    // DATES AUTORISÉES PAR LE
+    // FORFAIT GRATUIT API-FOOTBALL
+    // =========================
+
     const today = new Date();
 
-    // Aujourd'hui
-    const fromDate = today.toISOString().slice(0, 10);
+    const fromDateObject = new Date(today);
+    fromDateObject.setUTCDate(
+      fromDateObject.getUTCDate() - 1
+    );
 
-    // Aujourd'hui + 7 jours
     const toDateObject = new Date(today);
-    toDateObject.setUTCDate(toDateObject.getUTCDate() + 7);
+    toDateObject.setUTCDate(
+      toDateObject.getUTCDate() + 1
+    );
 
-    const toDate = toDateObject.toISOString().slice(0, 10);
+    const fromDate = fromDateObject
+      .toISOString()
+      .slice(0, 10);
+
+    const toDate = toDateObject
+      .toISOString()
+      .slice(0, 10);
 
     console.log(
       `🚀 Synchronisation des matchs du ${fromDate} au ${toDate}`
     );
 
-    // Récupération des matchs
+    // =========================
+    // RÉCUPÉRATION DES MATCHS
+    // =========================
+
     const fixtures = await fetchFixturesByDateRange(
       fromDate,
       toDate
@@ -61,9 +81,12 @@ async function syncMatches(req: NextRequest) {
     let predictionErrors = 0;
     let skippedFixtures = 0;
 
+    // =========================
+    // TRAITEMENT DES MATCHS
+    // =========================
+
     for (const fixture of fixtures) {
       try {
-        // Vérification des données
         if (
           !fixture?.fixture?.id ||
           !fixture?.league?.id ||
@@ -147,14 +170,15 @@ async function syncMatches(req: NextRequest) {
         // MATCH
         // =========================
 
-        const existingMatch = await prisma.match.findUnique({
-          where: {
-            externalId: fixture.fixture.id,
-          },
-          select: {
-            id: true,
-          },
-        });
+        const existingMatch =
+          await prisma.match.findUnique({
+            where: {
+              externalId: fixture.fixture.id,
+            },
+            select: {
+              id: true,
+            },
+          });
 
         const match = await prisma.match.upsert({
           where: {
@@ -162,7 +186,9 @@ async function syncMatches(req: NextRequest) {
           },
           update: {
             status: fixture.fixture.status.short,
-            kickoffAt: new Date(fixture.fixture.date),
+            kickoffAt: new Date(
+              fixture.fixture.date
+            ),
             leagueId: league.id,
             homeTeamId: homeTeam.id,
             awayTeamId: awayTeam.id,
@@ -172,7 +198,9 @@ async function syncMatches(req: NextRequest) {
             leagueId: league.id,
             homeTeamId: homeTeam.id,
             awayTeamId: awayTeam.id,
-            kickoffAt: new Date(fixture.fixture.date),
+            kickoffAt: new Date(
+              fixture.fixture.date
+            ),
             status: fixture.fixture.status.short,
           },
         });
@@ -191,8 +219,11 @@ async function syncMatches(req: NextRequest) {
         // PRÉDICTION
         // =========================
 
-        // NS = match pas encore commencé
         if (fixture.fixture.status.short !== "NS") {
+          console.log(
+            "⏭️ Prédiction ignorée : match déjà commencé ou terminé"
+          );
+
           continue;
         }
 
@@ -210,7 +241,6 @@ async function syncMatches(req: NextRequest) {
               fixture.league.id,
               fixture.league.season
             ),
-
             fetchTeamStatistics(
               fixture.teams.away.id,
               fixture.league.id,
@@ -223,13 +253,16 @@ async function syncMatches(req: NextRequest) {
               `⚠️ Statistiques indisponibles : ${fixture.teams.home.name} - ${fixture.teams.away.name}`
             );
 
+            predictionErrors++;
             continue;
           }
 
-          const homeStats = parseTeamAverages(homeStatsRaw);
-          const awayStats = parseTeamAverages(awayStatsRaw);
+          const homeStats =
+            parseTeamAverages(homeStatsRaw);
 
-          // Moyennes provisoires de la ligue
+          const awayStats =
+            parseTeamAverages(awayStatsRaw);
+
           const leagueAverages = {
             avgGoalsHome: 1.4,
             avgGoalsAway: 1.1,
@@ -246,24 +279,38 @@ async function syncMatches(req: NextRequest) {
               matchId: match.id,
             },
             update: {
-              predictedHomeGoals: result.predictedHomeGoals,
-              predictedAwayGoals: result.predictedAwayGoals,
-              exactScoreProb: result.exactScoreProb,
-              homeWinProb: result.homeWinProb,
-              drawProb: result.drawProb,
-              awayWinProb: result.awayWinProb,
-              scoreDistribution: result.scoreDistribution,
+              predictedHomeGoals:
+                result.predictedHomeGoals,
+              predictedAwayGoals:
+                result.predictedAwayGoals,
+              exactScoreProb:
+                result.exactScoreProb,
+              homeWinProb:
+                result.homeWinProb,
+              drawProb:
+                result.drawProb,
+              awayWinProb:
+                result.awayWinProb,
+              scoreDistribution:
+                result.scoreDistribution,
               modelVersion: "poisson-v1",
             },
             create: {
               matchId: match.id,
-              predictedHomeGoals: result.predictedHomeGoals,
-              predictedAwayGoals: result.predictedAwayGoals,
-              exactScoreProb: result.exactScoreProb,
-              homeWinProb: result.homeWinProb,
-              drawProb: result.drawProb,
-              awayWinProb: result.awayWinProb,
-              scoreDistribution: result.scoreDistribution,
+              predictedHomeGoals:
+                result.predictedHomeGoals,
+              predictedAwayGoals:
+                result.predictedAwayGoals,
+              exactScoreProb:
+                result.exactScoreProb,
+              homeWinProb:
+                result.homeWinProb,
+              drawProb:
+                result.drawProb,
+              awayWinProb:
+                result.awayWinProb,
+              scoreDistribution:
+                result.scoreDistribution,
               modelVersion: "poisson-v1",
             },
           });
@@ -291,13 +338,19 @@ async function syncMatches(req: NextRequest) {
       }
     }
 
+    // =========================
+    // RÉSUMÉ
+    // =========================
+
     console.log("====================================");
     console.log("✅ SYNCHRONISATION TERMINÉE");
     console.log(`Matchs trouvés : ${fixtures.length}`);
     console.log(`Matchs créés : ${matchesCreated}`);
     console.log(`Matchs mis à jour : ${matchesUpdated}`);
     console.log(`Prédictions : ${predictionsGenerated}`);
-    console.log(`Erreurs prédictions : ${predictionErrors}`);
+    console.log(
+      `Erreurs prédictions : ${predictionErrors}`
+    );
     console.log(`Matchs ignorés : ${skippedFixtures}`);
     console.log("====================================");
 
@@ -310,15 +363,10 @@ async function syncMatches(req: NextRequest) {
       },
 
       fixturesFound: fixtures.length,
-
       matchesCreated,
-
       matchesUpdated,
-
       predictionsGenerated,
-
       predictionErrors,
-
       skippedFixtures,
     });
   } catch (error) {
