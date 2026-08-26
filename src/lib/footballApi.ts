@@ -4,7 +4,7 @@
  * Documentation :
  * https://www.api-football.com/documentation-v3
  *
- * Nécessite la variable d'environnement :
+ * Nécessite :
  * API_FOOTBALL_KEY
  */
 
@@ -13,27 +13,41 @@ const BASE_URL = "https://v3.football.api-sports.io";
 function headers() {
   return {
     "x-apisports-key": process.env.API_FOOTBALL_KEY ?? "",
+    Accept: "application/json",
   };
 }
 
 async function fetchJson(url: string) {
+  console.log(`🌐 API-Football → ${url}`);
+
   const res = await fetch(url, {
+    method: "GET",
     headers: headers(),
     cache: "no-store",
   });
 
+  const data = await res.json();
+
   if (!res.ok) {
+    console.error(
+      `❌ API-Football HTTP ${res.status}:`,
+      JSON.stringify(data)
+    );
+
     throw new Error(
       `Erreur API-Football: ${res.status} ${res.statusText}`
     );
   }
 
-  const data = await res.json();
-
   if (
     data.errors &&
     Object.keys(data.errors).length > 0
   ) {
+    console.error(
+      "❌ Erreurs API-Football:",
+      JSON.stringify(data.errors)
+    );
+
     throw new Error(
       `Erreur API-Football: ${JSON.stringify(data.errors)}`
     );
@@ -54,11 +68,20 @@ export async function fetchFixturesByDate(date: string) {
 
   const data = await fetchJson(url.toString());
 
-  return (data.response ?? []) as any[];
+  const fixtures = (data.response ?? []) as any[];
+
+  console.log(
+    `⚽ ${fixtures.length} match(s) récupéré(s) pour ${date}`
+  );
+
+  return fixtures;
 }
 
 /**
- * Récupère les matchs d'une période.
+ * Récupère les matchs sur une période.
+ *
+ * Pour éviter les problèmes avec from/to,
+ * cette fonction effectue un appel par jour.
  *
  * @param fromDate Format YYYY-MM-DD
  * @param toDate Format YYYY-MM-DD
@@ -67,14 +90,32 @@ export async function fetchFixturesByDateRange(
   fromDate: string,
   toDate: string
 ) {
-  const url = new URL(`${BASE_URL}/fixtures`);
+  const fixtures: any[] = [];
 
-  url.searchParams.set("from", fromDate);
-  url.searchParams.set("to", toDate);
+  const start = new Date(`${fromDate}T00:00:00Z`);
+  const end = new Date(`${toDate}T00:00:00Z`);
 
-  const data = await fetchJson(url.toString());
+  for (
+    let current = new Date(start);
+    current <= end;
+    current.setUTCDate(current.getUTCDate() + 1)
+  ) {
+    const date = current.toISOString().slice(0, 10);
 
-  return (data.response ?? []) as any[];
+    console.log(
+      `📅 Récupération des matchs pour ${date}`
+    );
+
+    const dailyFixtures = await fetchFixturesByDate(date);
+
+    fixtures.push(...dailyFixtures);
+  }
+
+  console.log(
+    `⚽ Total : ${fixtures.length} match(s) récupéré(s) du ${fromDate} au ${toDate}`
+  );
+
+  return fixtures;
 }
 
 /**
