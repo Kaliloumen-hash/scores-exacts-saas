@@ -1,680 +1,945 @@
+import { NextRequest, NextResponse } from "next/server";
+
+import { prisma } from "@/lib/prisma";
+
+import {
+  fetchFixturesByDateRange,
+  fetchTeamStatistics,
+  parseTeamAverages,
+} from "@/lib/footballApi";
+
+import { predictMatch } from "@/lib/prediction";
+
+export const dynamic = "force-dynamic";
+
+export const maxDuration = 300;
+
 /**
- * Client API-Football / API-Sports
+ * Synchronisation des matchs + génération des prédictions.
  *
- * Documentation :
- * https://www.api-football.com/documentation-v3
- *
- * Variable d'environnement requise :
- * API_FOOTBALL_KEY
+ * GET  : utilisé par Vercel Cron
+ * POST : test manuel
  */
+async function syncMatches(req: NextRequest) {
+  const startTime = Date.now();
 
-const BASE_URL =
-  "https://v3.football.api-sports.io";
-
-const API_TIMEOUT_MS = 30_000;
-
-/**
- * Vérifie que la clé API existe.
- */
-function getApiKey(): string {
-  const apiKey =
-    process.env.API_FOOTBALL_KEY?.trim();
-
-  if (!apiKey) {
-    throw new Error(
-      "API_FOOTBALL_KEY est absente des variables d'environnement."
-    );
-  }
-
-  return apiKey;
-}
-
-/**
- * Headers API-Football.
- */
-function getHeaders(): HeadersInit {
-  return {
-    "x-apisports-key": getApiKey(),
-    Accept: "application/json",
-  };
-}
-
-/**
- * Erreur spécifique lorsqu'une date
- * n'est pas accessible avec le forfait API.
- */
-export class ApiFootballDateRestrictionError extends Error {
-  constructor(message: string) {
-    super(message);
-
-    this.name =
-      "ApiFootballDateRestrictionError";
-  }
-}
-
-/**
- * Erreur API-Football.
- */
-export class ApiFootballError extends Error {
-  status?: number;
-
-  constructor(
-    message: string,
-    status?: number
-  ) {
-    super(message);
-
-    this.name =
-      "ApiFootballError";
-
-    this.status = status;
-  }
-}
-
-/**
- * Vérifie si une erreur correspond
- * à une restriction de forfait/date.
- */
-function isDateRestrictionError(
-  errorText: string
-): boolean {
-  const text =
-    errorText.toLowerCase();
-
-  return (
-    text.includes(
-      "free plans do not have access to this date"
-    ) ||
-    text.includes(
-      "free plan does not have access to this date"
-    ) ||
-    text.includes(
-      "les forfaits gratuits n'ont pas accès à cette date"
-    ) ||
-    text.includes(
-      "les forfaits gratuits n’ont pas accès à cette date"
-    ) ||
-    text.includes(
-      "access to this date"
-    )
-  );
-}
-
-/**
- * Fetch JSON sécurisé avec timeout.
- */
-async function fetchJson<T = any>(
-  url: string
-): Promise<T> {
-  console.log(
-    `🌐 API-Football → ${url}`
-  );
-
-  const controller =
-    new AbortController();
-
-  const timeout =
-    setTimeout(() => {
-      controller.abort();
-    }, API_TIMEOUT_MS);
+  console.log("====================================");
+  console.log("🚀 DÉBUT SYNCHRONISATION");
+  console.log("====================================");
 
   try {
-    const response =
-      await fetch(url, {
-        method: "GET",
+    // ========================================
+    // 1. VÉRIFICATION CRON_SECRET
+    // ========================================
 
-        headers:
-          getHeaders(),
+    console.log("🔐 Vérification CRON_SECRET...");
 
-        cache: "no-store",
+    const cronSecret = process.env.CRON_SECRET;
 
-        signal:
-          controller.signal,
-      });
+    const authHeader = req.headers.get("authorization");
 
-    const rawText =
-      await response.text();
+    if (
+      !cronSecret ||
+      authHeader !== `Bearer ${cronSecret}`
+    ) {
+      console.error("❌ Accès non autorisé");
 
-    let data: any;
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Non autorisé",
+        },
+        {
+          status: 401,
+        }
+      );
+    }
+
+    console.log("✅ CRON_SECRET valide");
+
+    // ========================================
+    // 2. CALCUL DES DATES
+    // ========================================
+
+    const today = new Date();
+
+    const fromDateObject = new Date(today);
+
+    fromDateObject.setUTCDate(
+      fromDateObject.getUTCDate() - 1
+    );
+
+    const toDateObject = new Date(today);
+
+    toDateObject.setUTCDate(
+      toDateObject.getUTCDate() + 1
+    );
+
+    const fromDate = fromDateObject
+      .toISOString()
+      .slice(0, 10);
+
+    const toDate = toDateObject
+      .toISOString()
+      .slice(0, 10);
+
+    console.log("====================================");
+    console.log(`📅 DU : ${fromDate}`);
+    console.log(`📅 AU : ${toDate}`);
+    console.log("====================================");
+
+    // ========================================
+    // 3. RÉCUPÉRATION API-FOOTBALL
+    // ========================================
+
+    console.log("🌐 Connexion API-Football...");
+
+    let fixtures: any[] = [];
 
     try {
-      data =
-        rawText
-          ? JSON.parse(rawText)
-          : {};
-    } catch {
-      throw new ApiFootballError(
-        "API-Football a retourné une réponse JSON invalide.",
-        response.status
-      );
-    }
-
-    /*
-     * Erreur HTTP.
-     */
-    if (!response.ok) {
-      console.error(
-        `❌ API-Football HTTP ${response.status}`
-      );
-
-      console.error(
-        JSON.stringify(data)
-      );
-
-      throw new ApiFootballError(
-        `Erreur API-Football: ${response.status} ${response.statusText}`,
-        response.status
-      );
-    }
-
-    /*
-     * Erreurs retournées par API-Football
-     */
-    if (
-      data?.errors &&
-      Object.keys(data.errors).length > 0
-    ) {
-      const errorText =
-        JSON.stringify(
-          data.errors
-        );
-
-      console.error(
-        "❌ Erreurs API-Football:",
-        errorText
-      );
-
-      if (
-        isDateRestrictionError(
-          errorText
-        )
-      ) {
-        throw new ApiFootballDateRestrictionError(
-          errorText
-        );
-      }
-
-      throw new ApiFootballError(
-        `Erreur API-Football: ${errorText}`
-      );
-    }
-
-    return data as T;
-  } catch (error) {
-    /*
-     * Timeout.
-     */
-    if (
-      error instanceof
-        DOMException &&
-      error.name === "AbortError"
-    ) {
-      throw new ApiFootballError(
-        `Timeout API-Football après ${API_TIMEOUT_MS / 1000} secondes.`
-      );
-    }
-
-    /*
-     * Dans certains environnements,
-     * AbortError peut être un Error classique.
-     */
-    if (
-      error instanceof Error &&
-      error.name === "AbortError"
-    ) {
-      throw new ApiFootballError(
-        `Timeout API-Football après ${API_TIMEOUT_MS / 1000} secondes.`
-      );
-    }
-
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-/**
- * Récupère les matchs d'une date précise.
- *
- * Format :
- * YYYY-MM-DD
- *
- * Si la date n'est pas accessible avec
- * le forfait API, retourne [].
- */
-export async function fetchFixturesByDate(
-  date: string
-): Promise<any[]> {
-  if (
-    !/^\d{4}-\d{2}-\d{2}$/.test(
-      date
-    )
-  ) {
-    throw new Error(
-      `Date invalide : ${date}. Format attendu : YYYY-MM-DD.`
-    );
-  }
-
-  const url =
-    new URL(
-      `${BASE_URL}/fixtures`
-    );
-
-  url.searchParams.set(
-    "date",
-    date
-  );
-
-  try {
-    const data =
-      await fetchJson<{
-        response?: any[];
-      }>(
-        url.toString()
-      );
-
-    const fixtures =
-      Array.isArray(
-        data?.response
-      )
-        ? data.response
-        : [];
-
-    console.log(
-      `⚽ ${fixtures.length} match(s) récupéré(s) pour ${date}`
-    );
-
-    return fixtures;
-  } catch (error) {
-    if (
-      error instanceof
-      ApiFootballDateRestrictionError
-    ) {
-      console.warn(
-        `⚠️ Date ${date} non accessible avec le forfait API.`
-      );
-
-      return [];
-    }
-
-    throw error;
-  }
-}
-
-/**
- * Récupère les matchs d'une période.
- *
- * ATTENTION :
- * Cette fonction fait un appel par jour.
- *
- * Exemple :
- *
- * fetchFixturesByDateRange(
- *   "2026-08-26",
- *   "2026-08-27"
- * );
- */
-export async function fetchFixturesByDateRange(
-  fromDate: string,
-  toDate: string
-): Promise<any[]> {
-  if (
-    !/^\d{4}-\d{2}-\d{2}$/.test(
-      fromDate
-    )
-  ) {
-    throw new Error(
-      `fromDate invalide : ${fromDate}`
-    );
-  }
-
-  if (
-    !/^\d{4}-\d{2}-\d{2}$/.test(
-      toDate
-    )
-  ) {
-    throw new Error(
-      `toDate invalide : ${toDate}`
-    );
-  }
-
-  const start =
-    new Date(
-      `${fromDate}T00:00:00.000Z`
-    );
-
-  const end =
-    new Date(
-      `${toDate}T00:00:00.000Z`
-    );
-
-  if (
-    Number.isNaN(
-      start.getTime()
-    ) ||
-    Number.isNaN(
-      end.getTime()
-    )
-  ) {
-    throw new Error(
-      "Impossible de convertir les dates."
-    );
-  }
-
-  if (start > end) {
-    throw new Error(
-      `Période invalide : ${fromDate} → ${toDate}`
-    );
-  }
-
-  const fixtures: any[] = [];
-
-  for (
-    let current =
-      new Date(start);
-    current <= end;
-    current.setUTCDate(
-      current.getUTCDate() + 1
-    )
-  ) {
-    const date =
-      current
-        .toISOString()
-        .slice(0, 10);
-
-    console.log(
-      "------------------------------------"
-    );
-
-    console.log(
-      `📅 Récupération des matchs pour ${date}`
-    );
-
-    try {
-      const dailyFixtures =
-        await fetchFixturesByDate(
-          date
-        );
-
-      fixtures.push(
-        ...dailyFixtures
+      fixtures = await fetchFixturesByDateRange(
+        fromDate,
+        toDate
       );
 
       console.log(
-        `✅ ${date} : ${dailyFixtures.length} match(s)`
+        `✅ ${fixtures.length} match(s) récupéré(s)`
       );
     } catch (error) {
-      console.error(
-        `❌ Erreur récupération ${date}:`
-      );
-
+      console.error("❌ ERREUR API-FOOTBALL");
       console.error(error);
 
-      /*
-       * On continue avec le jour suivant.
-       */
-      continue;
+      throw error;
     }
+
+    // ========================================
+    // 4. COMPTEURS
+    // ========================================
+
+    let matchesCreated = 0;
+    let matchesUpdated = 0;
+
+    let predictionsGenerated = 0;
+    let predictionErrors = 0;
+
+    let skippedFixtures = 0;
+    let nonNsMatches = 0;
+
+    let statisticsErrors = 0;
+
+    // ========================================
+    // 5. TRAITEMENT DES MATCHS
+    // ========================================
+
+    console.log("====================================");
+    console.log("⚽ DÉBUT TRAITEMENT MATCHS");
+    console.log("====================================");
+
+    for (
+      let index = 0;
+      index < fixtures.length;
+      index++
+    ) {
+      const fixture = fixtures[index];
+
+      let homeName = "Inconnu";
+      let awayName = "Inconnu";
+
+      try {
+        // ====================================
+        // 5.1 VALIDATION
+        // ====================================
+
+        if (
+          !fixture?.fixture?.id ||
+          !fixture?.league?.id ||
+          !fixture?.teams?.home?.id ||
+          !fixture?.teams?.away?.id
+        ) {
+          console.warn(
+            "⚠️ Match ignoré : données incomplètes"
+          );
+
+          skippedFixtures++;
+
+          continue;
+        }
+
+        const fixtureId =
+          Number(fixture.fixture.id);
+
+        const leagueId =
+          Number(fixture.league.id);
+
+        const season =
+          Number(fixture.league.season);
+
+        homeName =
+          fixture.teams.home.name ?? "Inconnu";
+
+        awayName =
+          fixture.teams.away.name ?? "Inconnu";
+
+        const leagueName =
+          fixture.league.name ?? "Inconnu";
+
+        const status =
+          fixture.fixture?.status?.short ?? "NS";
+
+        const fixtureDate =
+          new Date(fixture.fixture.date);
+
+        // ====================================
+        // VALIDATION DATE
+        // ====================================
+
+        if (
+          Number.isNaN(
+            fixtureDate.getTime()
+          )
+        ) {
+          console.warn(
+            `⚠️ Date invalide pour ${homeName} - ${awayName}`
+          );
+
+          skippedFixtures++;
+
+          continue;
+        }
+
+        console.log(
+          "------------------------------------"
+        );
+
+        console.log(
+          `⚽ MATCH ${index + 1}/${fixtures.length}`
+        );
+
+        console.log(
+          `🆔 Fixture : ${fixtureId}`
+        );
+
+        console.log(
+          `🏆 Ligue : ${leagueName}`
+        );
+
+        console.log(
+          `🏠 ${homeName}`
+        );
+
+        console.log(
+          `✈️ ${awayName}`
+        );
+
+        console.log(
+          `📊 Statut : ${status}`
+        );
+
+        // ====================================
+        // 5.2 LIGUE
+        // ====================================
+
+        const league =
+          await prisma.league.upsert({
+            where: {
+              externalId: leagueId,
+            },
+
+            update: {
+              name: leagueName,
+
+              country:
+                fixture.league.country ??
+                null,
+
+              season,
+
+              logoUrl:
+                fixture.league.logo ??
+                null,
+            },
+
+            create: {
+              externalId: leagueId,
+
+              name: leagueName,
+
+              country:
+                fixture.league.country ??
+                null,
+
+              season,
+
+              logoUrl:
+                fixture.league.logo ??
+                null,
+            },
+          });
+
+        // ====================================
+        // 5.3 ÉQUIPE DOMICILE
+        // ====================================
+
+        const homeTeam =
+          await prisma.team.upsert({
+            where: {
+              externalId:
+                Number(
+                  fixture.teams.home.id
+                ),
+            },
+
+            update: {
+              name: homeName,
+
+              logoUrl:
+                fixture.teams.home.logo ??
+                null,
+
+              leagueId: league.id,
+            },
+
+            create: {
+              externalId:
+                Number(
+                  fixture.teams.home.id
+                ),
+
+              name: homeName,
+
+              logoUrl:
+                fixture.teams.home.logo ??
+                null,
+
+              leagueId: league.id,
+            },
+          });
+
+        // ====================================
+        // 5.4 ÉQUIPE EXTÉRIEURE
+        // ====================================
+
+        const awayTeam =
+          await prisma.team.upsert({
+            where: {
+              externalId:
+                Number(
+                  fixture.teams.away.id
+                ),
+            },
+
+            update: {
+              name: awayName,
+
+              logoUrl:
+                fixture.teams.away.logo ??
+                null,
+
+              leagueId: league.id,
+            },
+
+            create: {
+              externalId:
+                Number(
+                  fixture.teams.away.id
+                ),
+
+              name: awayName,
+
+              logoUrl:
+                fixture.teams.away.logo ??
+                null,
+
+              leagueId: league.id,
+            },
+          });
+
+        // ====================================
+        // 5.5 MATCH
+        // ====================================
+
+        const existingMatch =
+          await prisma.match.findUnique({
+            where: {
+              externalId: fixtureId,
+            },
+
+            select: {
+              id: true,
+            },
+          });
+
+        const match =
+          await prisma.match.upsert({
+            where: {
+              externalId: fixtureId,
+            },
+
+            update: {
+              status,
+
+              kickoffAt: fixtureDate,
+
+              leagueId: league.id,
+
+              homeTeamId: homeTeam.id,
+
+              awayTeamId: awayTeam.id,
+            },
+
+            create: {
+              externalId: fixtureId,
+
+              leagueId: league.id,
+
+              homeTeamId: homeTeam.id,
+
+              awayTeamId: awayTeam.id,
+
+              kickoffAt: fixtureDate,
+
+              status,
+            },
+          });
+
+        if (existingMatch) {
+          matchesUpdated++;
+
+          console.log(
+            "🔄 Match mis à jour"
+          );
+        } else {
+          matchesCreated++;
+
+          console.log(
+            "🆕 Match créé"
+          );
+        }
+
+        // ====================================
+        // 5.6 UNIQUEMENT LES MATCHS À VENIR
+        // ====================================
+
+        if (status !== "NS") {
+          nonNsMatches++;
+
+          console.log(
+            `⏭️ Pas de prédiction : statut ${status}`
+          );
+
+          continue;
+        }
+
+        // ====================================
+        // 5.7 DÉBUT PRÉDICTION
+        // ====================================
+
+        console.log(
+          "===================================="
+        );
+
+        console.log(
+          "🤖 DÉBUT PRÉDICTION"
+        );
+
+        console.log(
+          `🤖 ${homeName} - ${awayName}`
+        );
+
+        console.log(
+          "===================================="
+        );
+
+        // ====================================
+        // 5.8 RÉCUPÉRATION STATISTIQUES
+        // ====================================
+
+        let homeStatsRaw: any;
+        let awayStatsRaw: any;
+
+        try {
+          console.log(
+            `📊 Stats domicile : ${homeName}`
+          );
+
+          console.log(
+            `📊 Stats extérieur : ${awayName}`
+          );
+
+          [
+            homeStatsRaw,
+            awayStatsRaw,
+          ] = await Promise.all([
+            fetchTeamStatistics(
+              Number(
+                fixture.teams.home.id
+              ),
+              leagueId,
+              season
+            ),
+
+            fetchTeamStatistics(
+              Number(
+                fixture.teams.away.id
+              ),
+              leagueId,
+              season
+            ),
+          ]);
+
+          console.log(
+            "✅ Statistiques récupérées"
+          );
+        } catch (error) {
+          statisticsErrors++;
+
+          console.error(
+            "❌ ERREUR STATISTIQUES"
+          );
+
+          console.error(
+            `⚽ ${homeName} - ${awayName}`
+          );
+
+          console.error(error);
+
+          continue;
+        }
+
+        // ====================================
+        // 5.9 CONVERSION STATISTIQUES
+        // ====================================
+
+        let homeStats: ReturnType<
+          typeof parseTeamAverages
+        >;
+
+        let awayStats: ReturnType<
+          typeof parseTeamAverages
+        >;
+
+        try {
+          homeStats =
+            parseTeamAverages(
+              homeStatsRaw
+            );
+
+          awayStats =
+            parseTeamAverages(
+              awayStatsRaw
+            );
+        } catch (error) {
+          statisticsErrors++;
+
+          console.error(
+            "❌ ERREUR CONVERSION STATS"
+          );
+
+          console.error(error);
+
+          continue;
+        }
+
+        console.log(
+          "📈 Stats domicile :",
+          homeStats
+        );
+
+        console.log(
+          "📈 Stats extérieur :",
+          awayStats
+        );
+
+        // ====================================
+        // 5.10 VALIDATION DES STATS
+        // ====================================
+
+        const statsAreValid =
+          Number.isFinite(
+            homeStats.goalsScoredAvgHome
+          ) &&
+          Number.isFinite(
+            homeStats.goalsConcededAvgHome
+          ) &&
+          Number.isFinite(
+            homeStats.goalsScoredAvgAway
+          ) &&
+          Number.isFinite(
+            homeStats.goalsConcededAvgAway
+          ) &&
+          homeStats.goalsScoredAvgHome >= 0 &&
+          homeStats.goalsConcededAvgHome >= 0 &&
+          homeStats.goalsScoredAvgAway >= 0 &&
+          homeStats.goalsConcededAvgAway >= 0;
+
+        if (!statsAreValid) {
+          statisticsErrors++;
+
+          console.error(
+            "❌ Statistiques invalides"
+          );
+
+          continue;
+        }
+
+        // ====================================
+        // 5.11 MOYENNES DE LA LIGUE
+        // ====================================
+
+        /**
+         * Valeurs de secours.
+         *
+         * Elles permettent au moteur de fonctionner
+         * même si aucune moyenne de ligue spécifique
+         * n'est encore enregistrée en base.
+         */
+        const leagueAverages = {
+          avgGoalsHome: 1.4,
+          avgGoalsAway: 1.1,
+        };
+
+        console.log(
+          "📊 Moyennes ligue :",
+          leagueAverages
+        );
+
+        // ====================================
+        // 5.12 CALCUL PRÉDICTION
+        // ====================================
+
+        console.log(
+          "🧠 Calcul prédiction..."
+        );
+
+        const result =
+          predictMatch(
+            homeStats,
+            awayStats,
+            leagueAverages
+          );
+
+        console.log(
+          "✅ Prédiction calculée"
+        );
+
+        console.log(
+          "🎯 Résultat :",
+          result
+        );
+
+        // ====================================
+        // IMPORTANT :
+        // result.lambdaHome et result.lambdaAway
+        // N'EXISTENT PAS dans PredictionResult.
+        //
+        // On ne les utilise donc PAS ici.
+        // ====================================
+
+        console.log(
+          `🎯 Score prévu : ${result.predictedHomeGoals}-${result.predictedAwayGoals}`
+        );
+
+        console.log(
+          `📊 Probabilité score exact : ${result.exactScoreProb}`
+        );
+
+        console.log(
+          `🏠 Victoire domicile : ${result.homeWinProb}`
+        );
+
+        console.log(
+          `🤝 Nul : ${result.drawProb}`
+        );
+
+        console.log(
+          `✈️ Victoire extérieur : ${result.awayWinProb}`
+        );
+
+        // ====================================
+        // 5.13 ENREGISTREMENT PRÉDICTION
+        // ====================================
+
+        console.log(
+          "💾 Enregistrement prédiction..."
+        );
+
+        await prisma.prediction.upsert({
+          where: {
+            matchId: match.id,
+          },
+
+          update: {
+            predictedHomeGoals:
+              result.predictedHomeGoals,
+
+            predictedAwayGoals:
+              result.predictedAwayGoals,
+
+            exactScoreProb:
+              result.exactScoreProb,
+
+            homeWinProb:
+              result.homeWinProb,
+
+            drawProb:
+              result.drawProb,
+
+            awayWinProb:
+              result.awayWinProb,
+
+            scoreDistribution:
+              result.scoreDistribution,
+
+            modelVersion:
+              "poisson-v1",
+          },
+
+          create: {
+            matchId: match.id,
+
+            predictedHomeGoals:
+              result.predictedHomeGoals,
+
+            predictedAwayGoals:
+              result.predictedAwayGoals,
+
+            exactScoreProb:
+              result.exactScoreProb,
+
+            homeWinProb:
+              result.homeWinProb,
+
+            drawProb:
+              result.drawProb,
+
+            awayWinProb:
+              result.awayWinProb,
+
+            scoreDistribution:
+              result.scoreDistribution,
+
+            modelVersion:
+              "poisson-v1",
+          },
+        });
+
+        predictionsGenerated++;
+
+        console.log(
+          "===================================="
+        );
+
+        console.log(
+          "✅ PRÉDICTION ENREGISTRÉE"
+        );
+
+        console.log(
+          `⚽ ${homeName} - ${awayName}`
+        );
+
+        console.log(
+          `🎯 Score : ${result.predictedHomeGoals}-${result.predictedAwayGoals}`
+        );
+
+        console.log(
+          `🎯 Score exact : ${(
+            result.exactScoreProb * 100
+          ).toFixed(2)}%`
+        );
+
+        console.log(
+          `🏠 Victoire domicile : ${(
+            result.homeWinProb * 100
+          ).toFixed(2)}%`
+        );
+
+        console.log(
+          `🤝 Nul : ${(
+            result.drawProb * 100
+          ).toFixed(2)}%`
+        );
+
+        console.log(
+          `✈️ Victoire extérieur : ${(
+            result.awayWinProb * 100
+          ).toFixed(2)}%`
+        );
+
+        console.log(
+          "===================================="
+        );
+      } catch (error) {
+        predictionErrors++;
+
+        console.error(
+          "❌ ERREUR TRAITEMENT MATCH"
+        );
+
+        console.error(
+          `⚽ ${homeName} - ${awayName}`
+        );
+
+        console.error(
+          error instanceof Error
+            ? error.message
+            : error
+        );
+      }
+    }
+
+    // ========================================
+    // 6. RÉSUMÉ
+    // ========================================
+
+    const duration =
+      Date.now() - startTime;
+
+    console.log("");
+
+    console.log(
+      "===================================="
+    );
+
+    console.log(
+      "🏁 SYNCHRONISATION TERMINÉE"
+    );
+
+    console.log(
+      "===================================="
+    );
+
+    console.log(
+      `📅 Période : ${fromDate} → ${toDate}`
+    );
+
+    console.log(
+      `⚽ Matchs trouvés : ${fixtures.length}`
+    );
+
+    console.log(
+      `🆕 Matchs créés : ${matchesCreated}`
+    );
+
+    console.log(
+      `🔄 Matchs mis à jour : ${matchesUpdated}`
+    );
+
+    console.log(
+      `🤖 Prédictions : ${predictionsGenerated}`
+    );
+
+    console.log(
+      `❌ Erreurs prédictions : ${predictionErrors}`
+    );
+
+    console.log(
+      `📊 Erreurs statistiques : ${statisticsErrors}`
+    );
+
+    console.log(
+      `⏭️ Matchs non NS : ${nonNsMatches}`
+    );
+
+    console.log(
+      `⚠️ Matchs ignorés : ${skippedFixtures}`
+    );
+
+    console.log(
+      `⏱️ Durée : ${duration} ms`
+    );
+
+    console.log(
+      "===================================="
+    );
+
+    // ========================================
+    // 7. RÉPONSE JSON
+    // ========================================
+
+    return NextResponse.json({
+      ok: true,
+
+      dateRange: {
+        from: fromDate,
+        to: toDate,
+      },
+
+      fixturesFound:
+        fixtures.length,
+
+      matchesCreated,
+
+      matchesUpdated,
+
+      predictionsGenerated,
+
+      predictionErrors,
+
+      statisticsErrors,
+
+      nonNsMatches,
+
+      skippedFixtures,
+
+      durationMs: duration,
+    });
+  } catch (error) {
+    console.error("");
+
+    console.error(
+      "===================================="
+    );
+
+    console.error(
+      "❌ ERREUR GÉNÉRALE /api/matches/sync"
+    );
+
+    console.error(
+      "===================================="
+    );
+
+    console.error(error);
+
+    return NextResponse.json(
+      {
+        ok: false,
+
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erreur inconnue",
+      },
+      {
+        status: 500,
+      }
+    );
   }
-
-  console.log(
-    "===================================="
-  );
-
-  console.log(
-    `⚽ Total : ${fixtures.length} match(s)`
-  );
-
-  console.log(
-    `📅 Période : ${fromDate} → ${toDate}`
-  );
-
-  console.log(
-    "===================================="
-  );
-
-  return fixtures;
 }
 
-/**
- * Récupère les matchs d'une seule date
- * avec uniquement les paramètres utiles.
- *
- * Cette fonction est utile pour le Cron
- * lorsqu'on ne veut pas récupérer plusieurs jours.
- */
-export async function fetchFixturesByDateOnly(
-  date: string
-): Promise<any[]> {
-  return fetchFixturesByDate(
-    date
-  );
-}
+// ========================================
+// GET — VERCEL CRON
+// ========================================
 
-/**
- * Récupère le classement d'une ligue.
- */
-export async function fetchLeagueStandings(
-  leagueId: number,
-  season: number
-): Promise<any[]> {
-  if (
-    !Number.isInteger(
-      leagueId
-    ) ||
-    leagueId <= 0
-  ) {
-    throw new Error(
-      `leagueId invalide : ${leagueId}`
-    );
-  }
-
-  if (
-    !Number.isInteger(
-      season
-    ) ||
-    season < 1900
-  ) {
-    throw new Error(
-      `season invalide : ${season}`
-    );
-  }
-
-  const url =
-    new URL(
-      `${BASE_URL}/standings`
-    );
-
-  url.searchParams.set(
-    "league",
-    String(leagueId)
-  );
-
-  url.searchParams.set(
-    "season",
-    String(season)
-  );
-
-  const data =
-    await fetchJson<{
-      response?: any[];
-    }>(
-      url.toString()
-    );
-
-  return Array.isArray(
-    data?.response
-  )
-    ? data.response
-    : [];
-}
-
-/**
- * Récupère les statistiques
- * d'une équipe pour une ligue/saison.
- */
-export async function fetchTeamStatistics(
-  teamId: number,
-  leagueId: number,
-  season: number
-): Promise<any> {
-  if (
-    !Number.isInteger(
-      teamId
-    ) ||
-    teamId <= 0
-  ) {
-    throw new Error(
-      `teamId invalide : ${teamId}`
-    );
-  }
-
-  if (
-    !Number.isInteger(
-      leagueId
-    ) ||
-    leagueId <= 0
-  ) {
-    throw new Error(
-      `leagueId invalide : ${leagueId}`
-    );
-  }
-
-  if (
-    !Number.isInteger(
-      season
-    ) ||
-    season < 1900
-  ) {
-    throw new Error(
-      `season invalide : ${season}`
-    );
-  }
-
-  const url =
-    new URL(
-      `${BASE_URL}/teams/statistics`
-    );
-
-  url.searchParams.set(
-    "team",
-    String(teamId)
-  );
-
-  url.searchParams.set(
-    "league",
-    String(leagueId)
-  );
-
-  url.searchParams.set(
-    "season",
-    String(season)
-  );
-
-  const data =
-    await fetchJson<{
-      response?: any;
-    }>(
-      url.toString()
-    );
-
-  if (
-    !data ||
-    !data.response
-  ) {
-    throw new Error(
-      `Aucune statistique disponible pour l'équipe ${teamId}, ligue ${leagueId}, saison ${season}.`
-    );
-  }
-
-  return data.response;
-}
-
-/**
- * Convertit une valeur en nombre sûr.
- */
-function toNumber(
-  value: unknown,
-  fallback = 0
-): number {
-  const number =
-    Number(value);
-
-  return Number.isFinite(
-    number
-  )
-    ? number
-    : fallback;
-}
-
-/**
- * Convertit les statistiques API-Football
- * en statistiques utilisables par le moteur
- * de prédiction.
- */
-export function parseTeamAverages(
-  rawStats: any
+export async function GET(
+  req: NextRequest
 ) {
-  const played =
-    rawStats?.fixtures?.played;
+  console.log(
+    "⏰ Vercel Cron → GET /api/matches/sync"
+  );
 
-  const homePlayed =
-    toNumber(
-      played?.home
-    );
+  return syncMatches(req);
+}
 
-  const awayPlayed =
-    toNumber(
-      played?.away
-    );
+// ========================================
+// POST — TEST MANUEL
+// ========================================
 
-  const goalsFor =
-    rawStats?.goals?.for;
+export async function POST(
+  req: NextRequest
+) {
+  console.log(
+    "🔄 POST /api/matches/sync"
+  );
 
-  const goalsAgainst =
-    rawStats?.goals?.against;
-
-  const homeGoalsScored =
-    toNumber(
-      goalsFor?.average?.home
-    );
-
-  const homeGoalsConceded =
-    toNumber(
-      goalsAgainst?.average?.home
-    );
-
-  const awayGoalsScored =
-    toNumber(
-      goalsFor?.average?.away
-    );
-
-  const awayGoalsConceded =
-    toNumber(
-      goalsAgainst?.average?.away
-    );
-
-  return {
-    goalsScoredAvgHome:
-      homeGoalsScored,
-
-    goalsConcededAvgHome:
-      homeGoalsConceded,
-
-    goalsScoredAvgAway:
-      awayGoalsScored,
-
-    goalsConcededAvgAway:
-      awayGoalsConceded,
-
-    matchesPlayed:
-      homePlayed +
-      awayPlayed,
-
-    homeMatchesPlayed:
-      homePlayed,
-
-    awayMatchesPlayed:
-      awayPlayed,
-  };
+  return syncMatches(req);
 }
