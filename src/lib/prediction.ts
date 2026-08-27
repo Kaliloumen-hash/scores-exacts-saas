@@ -1,15 +1,8 @@
 /**
  * Moteur de prédiction football basé sur la loi de Poisson.
  *
- * Le moteur calcule :
- * - force offensive domicile
- * - force défensive domicile
- * - force offensive extérieur
- * - force défensive extérieur
- * - buts attendus (lambda)
- * - score exact le plus probable
- * - probabilités 1N2
- * - top 10 des scores probables
+ * Le moteur fonctionne même lorsque certaines statistiques
+ * d'équipe sont absentes ou invalides.
  */
 
 export interface TeamStats {
@@ -39,12 +32,28 @@ export interface PredictionResult {
   lambdaAway: number;
 }
 
-/**
- * Factorielle.
- *
- * Les scores de football restent petits,
- * donc cette méthode est suffisante.
- */
+function safeNumber(
+  value: unknown,
+  fallback: number
+): number {
+  const number = Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : fallback;
+}
+
+function clamp(
+  value: number,
+  min: number,
+  max: number
+): number {
+  return Math.min(
+    Math.max(value, min),
+    max
+  );
+}
+
 function factorial(n: number): number {
   if (n <= 1) {
     return 1;
@@ -59,174 +68,164 @@ function factorial(n: number): number {
   return result;
 }
 
-/**
- * Probabilité de Poisson.
- */
 function poissonProb(
   lambda: number,
-  k: number
+  goals: number
 ): number {
-  if (!Number.isFinite(lambda) || lambda < 0) {
-    return 0;
-  }
-
-  if (k < 0 || !Number.isInteger(k)) {
+  if (
+    !Number.isFinite(lambda) ||
+    lambda < 0 ||
+    goals < 0
+  ) {
     return 0;
   }
 
   if (lambda === 0) {
-    return k === 0 ? 1 : 0;
+    return goals === 0 ? 1 : 0;
   }
 
   return (
-    Math.pow(lambda, k) *
+    Math.pow(lambda, goals) *
     Math.exp(-lambda) /
-    factorial(k)
+    factorial(goals)
   );
 }
 
 /**
- * Nettoyage d'une valeur numérique.
+ * Valeurs de secours utilisées lorsqu'API-Football
+ * ne fournit pas de statistiques exploitables.
  */
-function safeNumber(
-  value: unknown,
-  fallback = 0
-): number {
-  const number = Number(value);
+function normalizeTeamStats(
+  stats: TeamStats
+): TeamStats {
+  return {
+    goalsScoredAvgHome: clamp(
+      safeNumber(
+        stats?.goalsScoredAvgHome,
+        1.4
+      ),
+      0.2,
+      4
+    ),
 
-  if (!Number.isFinite(number)) {
-    return fallback;
-  }
+    goalsConcededAvgHome: clamp(
+      safeNumber(
+        stats?.goalsConcededAvgHome,
+        1.1
+      ),
+      0.2,
+      4
+    ),
 
-  return number;
+    goalsScoredAvgAway: clamp(
+      safeNumber(
+        stats?.goalsScoredAvgAway,
+        1.1
+      ),
+      0.2,
+      4
+    ),
+
+    goalsConcededAvgAway: clamp(
+      safeNumber(
+        stats?.goalsConcededAvgAway,
+        1.4
+      ),
+      0.2,
+      4
+    ),
+  };
 }
 
-/**
- * Limite une valeur entre min et max.
- */
-function clamp(
-  value: number,
-  min: number,
-  max: number
-): number {
-  return Math.min(
-    Math.max(value, min),
-    max
-  );
-}
-
-/**
- * Prédit un match.
- */
 export function predictMatch(
   home: TeamStats,
   away: TeamStats,
   league: LeagueAverages,
   maxGoals = 8
 ): PredictionResult {
-  const avgGoalsHome = safeNumber(
-    league.avgGoalsHome,
-    1.4
-  );
+  const homeStats =
+    normalizeTeamStats(home);
 
-  const avgGoalsAway = safeNumber(
-    league.avgGoalsAway,
-    1.1
-  );
+  const awayStats =
+    normalizeTeamStats(away);
 
-  /*
-   * Évite une division par zéro.
-   */
-  const safeLeagueHome =
-    avgGoalsHome > 0
-      ? avgGoalsHome
-      : 1.4;
-
-  const safeLeagueAway =
-    avgGoalsAway > 0
-      ? avgGoalsAway
-      : 1.1;
-
-  /*
-   * Statistiques domicile.
-   */
-  const homeGoalsScored =
-    safeNumber(
-      home.goalsScoredAvgHome
+  const leagueHome =
+    clamp(
+      safeNumber(
+        league?.avgGoalsHome,
+        1.4
+      ),
+      0.5,
+      3
     );
 
-  const homeGoalsConceded =
-    safeNumber(
-      home.goalsConcededAvgHome
+  const leagueAway =
+    clamp(
+      safeNumber(
+        league?.avgGoalsAway,
+        1.1
+      ),
+      0.5,
+      3
     );
 
   /*
-   * Statistiques extérieur.
+   * Force offensive domicile.
    */
-  const awayGoalsScored =
-    safeNumber(
-      away.goalsScoredAvgAway
-    );
-
-  const awayGoalsConceded =
-    safeNumber(
-      away.goalsConcededAvgAway
-    );
+  const homeAttack =
+    homeStats.goalsScoredAvgHome /
+    leagueHome;
 
   /*
-   * Forces offensives.
-   */
-  const homeAttackStrength =
-    homeGoalsScored /
-    safeLeagueHome;
-
-  const awayAttackStrength =
-    awayGoalsScored /
-    safeLeagueAway;
-
-  /*
-   * Forces défensives.
+   * Force défensive extérieur.
    *
-   * Plus une équipe encaisse de buts,
-   * plus sa faiblesse défensive est élevée.
+   * Plus l'équipe extérieure encaisse,
+   * plus l'adversaire a de potentiel offensif.
    */
-  const homeDefenseStrength =
-    homeGoalsConceded /
-    safeLeagueAway;
-
-  const awayDefenseStrength =
-    awayGoalsConceded /
-    safeLeagueHome;
+  const awayDefense =
+    awayStats.goalsConcededAvgAway /
+    leagueHome;
 
   /*
-   * Lambda domicile.
+   * Force offensive extérieur.
+   */
+  const awayAttack =
+    awayStats.goalsScoredAvgAway /
+    leagueAway;
+
+  /*
+   * Force défensive domicile.
+   */
+  const homeDefense =
+    homeStats.goalsConcededAvgHome /
+    leagueAway;
+
+  /*
+   * Buts attendus.
    */
   let lambdaHome =
-    homeAttackStrength *
-    awayDefenseStrength *
-    safeLeagueHome;
+    homeAttack *
+    awayDefense *
+    leagueHome;
 
-  /*
-   * Lambda extérieur.
-   */
   let lambdaAway =
-    awayAttackStrength *
-    homeDefenseStrength *
-    safeLeagueAway;
+    awayAttack *
+    homeDefense *
+    leagueAway;
 
   /*
-   * Protection contre les valeurs absurdes.
+   * Protection.
    */
   lambdaHome = clamp(
-    safeNumber(lambdaHome, 0.1),
-    0.05,
-    8
+    safeNumber(lambdaHome, 1.4),
+    0.2,
+    5
   );
 
   lambdaAway = clamp(
-    safeNumber(lambdaAway, 0.1),
-    0.05,
-    8
+    safeNumber(lambdaAway, 1.1),
+    0.2,
+    5
   );
 
   /*
@@ -248,41 +247,47 @@ export function predictMatch(
       awayGoals <= maxGoals;
       awayGoals++
     ) {
-      const homeProbability =
+      const homeProb =
         poissonProb(
           lambdaHome,
           homeGoals
         );
 
-      const awayProbability =
+      const awayProb =
         poissonProb(
           lambdaAway,
           awayGoals
         );
 
-      const probability =
-        homeProbability *
-        awayProbability;
-
       matrix.push({
         home: homeGoals,
         away: awayGoals,
-        prob: probability,
+        prob:
+          homeProb * awayProb,
       });
     }
   }
+
+  /*
+   * Total de la matrice.
+   */
+  const total =
+    matrix.reduce(
+      (sum, item) =>
+        sum + item.prob,
+      0
+    );
 
   /*
    * Score exact le plus probable.
    */
   const best =
     matrix.reduce(
-      (maximum, current) => {
-        return current.prob >
-          maximum.prob
+      (maximum, current) =>
+        current.prob >
+        maximum.prob
           ? current
-          : maximum;
-      },
+          : maximum,
       matrix[0]
     );
 
@@ -308,11 +313,6 @@ export function predictMatch(
   /*
    * Normalisation.
    */
-  const total =
-    homeWinProb +
-    drawProb +
-    awayWinProb;
-
   if (total > 0) {
     homeWinProb /=
       total;
@@ -341,7 +341,8 @@ export function predictMatch(
         prob:
           Number(
             (
-              item.prob / total
+              item.prob /
+              total
             ).toFixed(4)
           ),
       }));
@@ -356,7 +357,8 @@ export function predictMatch(
     exactScoreProb:
       Number(
         (
-          best.prob / total
+          best.prob /
+          total
         ).toFixed(4)
       ),
 
