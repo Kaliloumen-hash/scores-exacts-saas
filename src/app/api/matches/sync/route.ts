@@ -58,30 +58,20 @@ async function syncMatches(req: NextRequest) {
     console.log("✅ CRON_SECRET valide");
 
     // ========================================
-    // 2. CALCUL DES DATES
+    // 2. DATES À SYNCHRONISER
+    // ========================================
+    //
+    // IMPORTANT :
+    // On veut explicitement :
+    //
+    // 27 août 2026
+    // 28 août 2026
+    // 29 août 2026
+    //
     // ========================================
 
-    const today = new Date();
-
-    const fromDateObject = new Date(today);
-
-    fromDateObject.setUTCDate(
-      fromDateObject.getUTCDate() - 1
-    );
-
-    const toDateObject = new Date(today);
-
-    toDateObject.setUTCDate(
-      toDateObject.getUTCDate() + 1
-    );
-
-    const fromDate = fromDateObject
-      .toISOString()
-      .slice(0, 10);
-
-    const toDate = toDateObject
-      .toISOString()
-      .slice(0, 10);
+    const fromDate = "2026-08-27";
+    const toDate = "2026-08-29";
 
     console.log("====================================");
     console.log(`📅 DU : ${fromDate}`);
@@ -175,16 +165,24 @@ async function syncMatches(req: NextRequest) {
           Number(fixture.league.season);
 
         homeName =
-          fixture.teams.home.name ?? "Inconnu";
+          fixture.teams.home.name ??
+          "Inconnu";
 
         awayName =
-          fixture.teams.away.name ?? "Inconnu";
+          fixture.teams.away.name ??
+          "Inconnu";
 
         const leagueName =
-          fixture.league.name ?? "Inconnu";
+          fixture.league.name ??
+          "Inconnu";
+
+        const leagueCountry =
+          fixture.league.country ??
+          "Inconnu";
 
         const status =
-          fixture.fixture?.status?.short ?? "NS";
+          fixture.fixture?.status?.short ??
+          "NS";
 
         const fixtureDate =
           new Date(fixture.fixture.date);
@@ -224,11 +222,19 @@ async function syncMatches(req: NextRequest) {
         );
 
         console.log(
+          `🌍 Pays : ${leagueCountry}`
+        );
+
+        console.log(
           `🏠 ${homeName}`
         );
 
         console.log(
           `✈️ ${awayName}`
+        );
+
+        console.log(
+          `📅 Date : ${fixtureDate.toISOString()}`
         );
 
         console.log(
@@ -247,11 +253,7 @@ async function syncMatches(req: NextRequest) {
 
             update: {
               name: leagueName,
-
-              country:
-                fixture.league.country ??
-                null,
-
+              country: leagueCountry,
               season,
 
               logoUrl:
@@ -261,13 +263,8 @@ async function syncMatches(req: NextRequest) {
 
             create: {
               externalId: leagueId,
-
               name: leagueName,
-
-              country:
-                fixture.league.country ??
-                null,
-
+              country: leagueCountry,
               season,
 
               logoUrl:
@@ -369,6 +366,21 @@ async function syncMatches(req: NextRequest) {
             },
           });
 
+        // Scores
+        const homeScore =
+          fixture.goals?.home != null
+            ? Number(
+                fixture.goals.home
+              )
+            : null;
+
+        const awayScore =
+          fixture.goals?.away != null
+            ? Number(
+                fixture.goals.away
+              )
+            : null;
+
         const match =
           await prisma.match.upsert({
             where: {
@@ -382,9 +394,15 @@ async function syncMatches(req: NextRequest) {
 
               leagueId: league.id,
 
-              homeTeamId: homeTeam.id,
+              homeTeamId:
+                homeTeam.id,
 
-              awayTeamId: awayTeam.id,
+              awayTeamId:
+                awayTeam.id,
+
+              homeScore,
+
+              awayScore,
             },
 
             create: {
@@ -392,13 +410,19 @@ async function syncMatches(req: NextRequest) {
 
               leagueId: league.id,
 
-              homeTeamId: homeTeam.id,
+              homeTeamId:
+                homeTeam.id,
 
-              awayTeamId: awayTeam.id,
+              awayTeamId:
+                awayTeam.id,
 
               kickoffAt: fixtureDate,
 
               status,
+
+              homeScore,
+
+              awayScore,
             },
           });
 
@@ -586,13 +610,6 @@ async function syncMatches(req: NextRequest) {
         // 5.11 MOYENNES DE LA LIGUE
         // ====================================
 
-        /**
-         * Valeurs de secours.
-         *
-         * Elles permettent au moteur de fonctionner
-         * même si aucune moyenne de ligue spécifique
-         * n'est encore enregistrée en base.
-         */
         const leagueAverages = {
           avgGoalsHome: 1.4,
           avgGoalsAway: 1.1,
@@ -626,14 +643,6 @@ async function syncMatches(req: NextRequest) {
           "🎯 Résultat :",
           result
         );
-
-        // ====================================
-        // IMPORTANT :
-        // result.lambdaHome et result.lambdaAway
-        // N'EXISTENT PAS dans PredictionResult.
-        //
-        // On ne les utilise donc PAS ici.
-        // ====================================
 
         console.log(
           `🎯 Score prévu : ${result.predictedHomeGoals}-${result.predictedAwayGoals}`
@@ -692,6 +701,9 @@ async function syncMatches(req: NextRequest) {
 
             modelVersion:
               "poisson-v1",
+
+            generatedAt:
+              new Date(),
           },
 
           create: {
