@@ -10,20 +10,21 @@ const FREE_PLAN_DAILY_LIMIT = 3;
 
 export async function GET(req: NextRequest) {
   try {
+    console.log("====================================");
+    console.log("🔮 GET /api/predictions");
+    console.log("====================================");
+
     /*
      * ============================================================
-     * 1. RÉCUPÉRATION DE LA SESSION
+     * 1. SESSION
      * ============================================================
-     *
-     * La connexion n'est plus obligatoire pour afficher
-     * les prédictions publiques du dashboard.
      */
 
     const session =
       await getServerSession(authOptions);
 
-    let isPro = false;
     let userId: string | null = null;
+    let isPro = false;
 
     if (session?.user) {
       userId =
@@ -36,7 +37,6 @@ export async function GET(req: NextRequest) {
             where: {
               id: userId,
             },
-
             select: {
               subscriptionPlan: true,
               subscriptionStatus: true,
@@ -49,16 +49,20 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    console.log(
+      `👤 Utilisateur : ${
+        userId ?? "visiteur"
+      }`
+    );
+
+    console.log(
+      `⭐ Pro : ${isPro}`
+    );
+
     /*
      * ============================================================
-     * 2. QUOTA UTILISATEUR CONNECTÉ
+     * 2. QUOTA GRATUIT
      * ============================================================
-     *
-     * Les utilisateurs gratuits connectés restent limités
-     * à 3 consultations par jour.
-     *
-     * Les visiteurs non connectés peuvent voir la liste
-     * publique du dashboard.
      */
 
     if (
@@ -86,15 +90,23 @@ export async function GET(req: NextRequest) {
           },
         });
 
+      console.log(
+        `📊 Vues aujourd'hui : ${viewsToday}/${FREE_PLAN_DAILY_LIMIT}`
+      );
+
       if (
         viewsToday >=
         FREE_PLAN_DAILY_LIMIT
       ) {
         return NextResponse.json(
           {
+            success: false,
+
             error:
               "Quota gratuit atteint. Passez au plan Pro pour un accès illimité.",
+
             isPro: false,
+
             quotaReached: true,
           },
           {
@@ -108,24 +120,24 @@ export async function GET(req: NextRequest) {
      * ============================================================
      * 3. DATE ACTUELLE
      * ============================================================
-     *
-     * On récupère uniquement les matchs à venir.
      */
 
     const now =
       new Date();
 
+    console.log(
+      `📅 Maintenant : ${now.toISOString()}`
+    );
+
     /*
      * ============================================================
-     * 4. RÉCUPÉRATION DES PRÉDICTIONS
+     * 4. MATCHS FUTURS AVEC PRÉDICTION
      * ============================================================
      *
-     * On prend les matchs :
-     * - prévus
-     * - avec une prédiction
-     * - à partir de maintenant
+     * IMPORTANT :
+     * On ne filtre plus sur status = "NS".
      *
-     * Limite : 20 matchs.
+     * La date de coup d'envoi est la référence principale.
      */
 
     const matches =
@@ -135,8 +147,6 @@ export async function GET(req: NextRequest) {
             gte: now,
           },
 
-          status: "NS",
-
           prediction: {
             isNot: null,
           },
@@ -144,8 +154,11 @@ export async function GET(req: NextRequest) {
 
         include: {
           homeTeam: true,
+
           awayTeam: true,
+
           league: true,
+
           prediction: true,
         },
 
@@ -156,9 +169,45 @@ export async function GET(req: NextRequest) {
         take: 20,
       });
 
+    console.log(
+      `⚽ ${matches.length} match(s) futur(s) avec prédiction`
+    );
+
     /*
      * ============================================================
-     * 5. RÉPONSE
+     * 5. SI AUCUN MATCH
+     * ============================================================
+     */
+
+    if (matches.length === 0) {
+      console.warn(
+        "⚠️ Aucun match futur avec prédiction trouvé."
+      );
+
+      /*
+       * Diagnostic :
+       * on regarde combien de prédictions existent
+       * réellement dans la base.
+       */
+
+      const predictionCount =
+        await prisma.prediction.count();
+
+      const matchCount =
+        await prisma.match.count();
+
+      console.log(
+        `📊 Nombre total de matchs : ${matchCount}`
+      );
+
+      console.log(
+        `🤖 Nombre total de prédictions : ${predictionCount}`
+      );
+    }
+
+    /*
+     * ============================================================
+     * 6. RÉPONSE
      * ============================================================
      */
 
@@ -176,9 +225,18 @@ export async function GET(req: NextRequest) {
     });
   } catch (error) {
     console.error(
-      "❌ Erreur /api/predictions :",
-      error
+      "===================================="
     );
+
+    console.error(
+      "❌ ERREUR /api/predictions"
+    );
+
+    console.error(
+      "===================================="
+    );
+
+    console.error(error);
 
     return NextResponse.json(
       {
@@ -188,6 +246,8 @@ export async function GET(req: NextRequest) {
           error instanceof Error
             ? error.message
             : "Impossible de récupérer les prédictions.",
+
+        isPro: false,
       },
       {
         status: 500,
