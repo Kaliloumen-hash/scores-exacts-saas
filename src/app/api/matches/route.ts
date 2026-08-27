@@ -1,3 +1,4 @@
+```typescript
 import { NextRequest, NextResponse } from "next/server";
 
 import { prisma } from "@/lib/prisma";
@@ -11,38 +12,116 @@ import {
 import { predictMatch } from "@/lib/prediction";
 
 export const dynamic = "force-dynamic";
-
 export const maxDuration = 300;
 
-/**
- * Synchronisation des matchs + génération des prédictions.
+/*
+ * ============================================================
+ * CONFIGURATION
+ * ============================================================
  *
- * GET  : utilisé par Vercel Cron
- * POST : test manuel
+ * Le Cron reste protégé par CRON_SECRET.
+ *
+ * Pour un test manuel :
+ *
+ * GET /api/matches/sync?test=1&key=TA_CLE_DE_TEST
+ *
+ * Il faut définir dans Vercel :
+ *
+ * SYNC_TEST_KEY=une-cle-secrete
+ *
+ * IMPORTANT :
+ * Ne jamais mettre CRON_SECRET directement dans le navigateur.
  */
-async function syncMatches(req: NextRequest) {
+
+function isAuthorized(req: NextRequest): boolean {
+  const cronSecret = process.env.CRON_SECRET;
+  const testKey = process.env.SYNC_TEST_KEY;
+
+  const authorization =
+    req.headers.get("authorization");
+
+  /*
+   * Autorisation Cron
+   */
+  if (
+    cronSecret &&
+    authorization === `Bearer ${cronSecret}`
+  ) {
+    return true;
+  }
+
+  /*
+   * Autorisation test manuel
+   */
+  const key =
+    req.nextUrl.searchParams.get("key");
+
+  const test =
+    req.nextUrl.searchParams.get("test");
+
+  if (
+    test === "1" &&
+    testKey &&
+    key === testKey
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/*
+ * ============================================================
+ * DATE DU JOUR
+ * ============================================================
+ */
+
+function formatUTCDate(
+  date: Date
+): string {
+  return date
+    .toISOString()
+    .slice(0, 10);
+}
+
+/*
+ * ============================================================
+ * SYNCHRONISATION
+ * ============================================================
+ */
+
+async function syncMatches(
+  req: NextRequest
+) {
   const startTime = Date.now();
 
-  console.log("====================================");
-  console.log("🚀 DÉBUT SYNCHRONISATION");
-  console.log("====================================");
+  console.log(
+    "===================================="
+  );
+
+  console.log(
+    "🚀 DÉBUT SYNCHRONISATION"
+  );
+
+  console.log(
+    "===================================="
+  );
 
   try {
-    // ========================================
-    // 1. VÉRIFICATION CRON_SECRET
-    // ========================================
+    /*
+     * ========================================================
+     * 1. SÉCURITÉ
+     * ========================================================
+     */
 
-    console.log("🔐 Vérification CRON_SECRET...");
+    console.log(
+      "🔐 Vérification autorisation..."
+    );
 
-    const cronSecret = process.env.CRON_SECRET;
-
-    const authHeader = req.headers.get("authorization");
-
-    if (
-      !cronSecret ||
-      authHeader !== `Bearer ${cronSecret}`
-    ) {
-      console.error("❌ Accès non autorisé");
+    if (!isAuthorized(req)) {
+      console.error(
+        "❌ Accès non autorisé"
+      );
 
       return NextResponse.json(
         {
@@ -55,56 +134,105 @@ async function syncMatches(req: NextRequest) {
       );
     }
 
-    console.log("✅ CRON_SECRET valide");
+    console.log(
+      "✅ Autorisation valide"
+    );
 
-    // ========================================
-    // 2. DATES À SYNCHRONISER
-    // ========================================
-    //
-    // IMPORTANT :
-    // On veut explicitement :
-    //
-    // 27 août 2026
-    // 28 août 2026
-    // 29 août 2026
-    //
-    // ========================================
+    /*
+     * ========================================================
+     * 2. DATES
+     * ========================================================
+     *
+     * On synchronise :
+     *
+     * hier
+     * aujourd'hui
+     * demain
+     *
+     * Cela évite de demander automatiquement
+     * des dates trop éloignées au forfait gratuit.
+     */
 
-    const fromDate = "2026-08-27";
-    const toDate = "2026-08-29";
+    const today =
+      new Date();
 
-    console.log("====================================");
-    console.log(`📅 DU : ${fromDate}`);
-    console.log(`📅 AU : ${toDate}`);
-    console.log("====================================");
+    const fromDateObject =
+      new Date(today);
 
-    // ========================================
-    // 3. RÉCUPÉRATION API-FOOTBALL
-    // ========================================
+    fromDateObject.setUTCDate(
+      fromDateObject.getUTCDate() - 1
+    );
 
-    console.log("🌐 Connexion API-Football...");
+    const toDateObject =
+      new Date(today);
+
+    toDateObject.setUTCDate(
+      toDateObject.getUTCDate() + 1
+    );
+
+    const fromDate =
+      formatUTCDate(
+        fromDateObject
+      );
+
+    const toDate =
+      formatUTCDate(
+        toDateObject
+      );
+
+    console.log(
+      "===================================="
+    );
+
+    console.log(
+      `📅 DU : ${fromDate}`
+    );
+
+    console.log(
+      `📅 AU : ${toDate}`
+    );
+
+    console.log(
+      "===================================="
+    );
+
+    /*
+     * ========================================================
+     * 3. RÉCUPÉRATION DES MATCHS
+     * ========================================================
+     */
+
+    console.log(
+      "🌐 Connexion API-Football..."
+    );
 
     let fixtures: any[] = [];
 
     try {
-      fixtures = await fetchFixturesByDateRange(
-        fromDate,
-        toDate
-      );
+      fixtures =
+        await fetchFixturesByDateRange(
+          fromDate,
+          toDate
+        );
 
       console.log(
         `✅ ${fixtures.length} match(s) récupéré(s)`
       );
     } catch (error) {
-      console.error("❌ ERREUR API-FOOTBALL");
+      console.error(
+        "❌ ERREUR API-FOOTBALL"
+      );
+
       console.error(error);
 
       throw error;
     }
 
-    // ========================================
-    // 4. COMPTEURS
-    // ========================================
+    /*
+     * ========================================================
+     * 4. COMPTEURS
+     * ========================================================
+     */
 
     let matchesCreated = 0;
     let matchesUpdated = 0;
@@ -116,29 +244,46 @@ async function syncMatches(req: NextRequest) {
     let nonNsMatches = 0;
 
     let statisticsErrors = 0;
+    let fallbackStatisticsUsed = 0;
 
-    // ========================================
-    // 5. TRAITEMENT DES MATCHS
-    // ========================================
+    /*
+     * ========================================================
+     * 5. TRAITEMENT DES MATCHS
+     * ========================================================
+     */
 
-    console.log("====================================");
-    console.log("⚽ DÉBUT TRAITEMENT MATCHS");
-    console.log("====================================");
+    console.log(
+      "===================================="
+    );
+
+    console.log(
+      "⚽ DÉBUT TRAITEMENT MATCHS"
+    );
+
+    console.log(
+      "===================================="
+    );
 
     for (
       let index = 0;
       index < fixtures.length;
       index++
     ) {
-      const fixture = fixtures[index];
+      const fixture =
+        fixtures[index];
 
-      let homeName = "Inconnu";
-      let awayName = "Inconnu";
+      let homeName =
+        "Inconnu";
+
+      let awayName =
+        "Inconnu";
 
       try {
-        // ====================================
-        // 5.1 VALIDATION
-        // ====================================
+        /*
+         * ====================================================
+         * 5.1 VALIDATION
+         * ====================================================
+         */
 
         if (
           !fixture?.fixture?.id ||
@@ -156,13 +301,19 @@ async function syncMatches(req: NextRequest) {
         }
 
         const fixtureId =
-          Number(fixture.fixture.id);
+          Number(
+            fixture.fixture.id
+          );
 
         const leagueId =
-          Number(fixture.league.id);
+          Number(
+            fixture.league.id
+          );
 
         const season =
-          Number(fixture.league.season);
+          Number(
+            fixture.league.season
+          );
 
         homeName =
           fixture.teams.home.name ??
@@ -185,11 +336,15 @@ async function syncMatches(req: NextRequest) {
           "NS";
 
         const fixtureDate =
-          new Date(fixture.fixture.date);
+          new Date(
+            fixture.fixture.date
+          );
 
-        // ====================================
-        // VALIDATION DATE
-        // ====================================
+        /*
+         * ====================================================
+         * 5.2 DATE
+         * ====================================================
+         */
 
         if (
           Number.isNaN(
@@ -197,7 +352,7 @@ async function syncMatches(req: NextRequest) {
           )
         ) {
           console.warn(
-            `⚠️ Date invalide pour ${homeName} - ${awayName}`
+            `⚠️ Date invalide : ${homeName} - ${awayName}`
           );
 
           skippedFixtures++;
@@ -241,19 +396,26 @@ async function syncMatches(req: NextRequest) {
           `📊 Statut : ${status}`
         );
 
-        // ====================================
-        // 5.2 LIGUE
-        // ====================================
+        /*
+         * ====================================================
+         * 5.3 LIGUE
+         * ====================================================
+         */
 
         const league =
           await prisma.league.upsert({
             where: {
-              externalId: leagueId,
+              externalId:
+                leagueId,
             },
 
             update: {
-              name: leagueName,
-              country: leagueCountry,
+              name:
+                leagueName,
+
+              country:
+                leagueCountry,
+
               season,
 
               logoUrl:
@@ -262,9 +424,15 @@ async function syncMatches(req: NextRequest) {
             },
 
             create: {
-              externalId: leagueId,
-              name: leagueName,
-              country: leagueCountry,
+              externalId:
+                leagueId,
+
+              name:
+                leagueName,
+
+              country:
+                leagueCountry,
+
               season,
 
               logoUrl:
@@ -273,9 +441,11 @@ async function syncMatches(req: NextRequest) {
             },
           });
 
-        // ====================================
-        // 5.3 ÉQUIPE DOMICILE
-        // ====================================
+        /*
+         * ====================================================
+         * 5.4 ÉQUIPE DOMICILE
+         * ====================================================
+         */
 
         const homeTeam =
           await prisma.team.upsert({
@@ -287,13 +457,15 @@ async function syncMatches(req: NextRequest) {
             },
 
             update: {
-              name: homeName,
+              name:
+                homeName,
 
               logoUrl:
                 fixture.teams.home.logo ??
                 null,
 
-              leagueId: league.id,
+              leagueId:
+                league.id,
             },
 
             create: {
@@ -302,19 +474,23 @@ async function syncMatches(req: NextRequest) {
                   fixture.teams.home.id
                 ),
 
-              name: homeName,
+              name:
+                homeName,
 
               logoUrl:
                 fixture.teams.home.logo ??
                 null,
 
-              leagueId: league.id,
+              leagueId:
+                league.id,
             },
           });
 
-        // ====================================
-        // 5.4 ÉQUIPE EXTÉRIEURE
-        // ====================================
+        /*
+         * ====================================================
+         * 5.5 ÉQUIPE EXTÉRIEURE
+         * ====================================================
+         */
 
         const awayTeam =
           await prisma.team.upsert({
@@ -326,13 +502,15 @@ async function syncMatches(req: NextRequest) {
             },
 
             update: {
-              name: awayName,
+              name:
+                awayName,
 
               logoUrl:
                 fixture.teams.away.logo ??
                 null,
 
-              leagueId: league.id,
+              leagueId:
+                league.id,
             },
 
             create: {
@@ -341,32 +519,24 @@ async function syncMatches(req: NextRequest) {
                   fixture.teams.away.id
                 ),
 
-              name: awayName,
+              name:
+                awayName,
 
               logoUrl:
                 fixture.teams.away.logo ??
                 null,
 
-              leagueId: league.id,
+              leagueId:
+                league.id,
             },
           });
 
-        // ====================================
-        // 5.5 MATCH
-        // ====================================
+        /*
+         * ====================================================
+         * 5.6 SCORES
+         * ====================================================
+         */
 
-        const existingMatch =
-          await prisma.match.findUnique({
-            where: {
-              externalId: fixtureId,
-            },
-
-            select: {
-              id: true,
-            },
-          });
-
-        // Scores
         const homeScore =
           fixture.goals?.home != null
             ? Number(
@@ -381,18 +551,39 @@ async function syncMatches(req: NextRequest) {
               )
             : null;
 
+        /*
+         * ====================================================
+         * 5.7 MATCH
+         * ====================================================
+         */
+
+        const existingMatch =
+          await prisma.match.findUnique({
+            where: {
+              externalId:
+                fixtureId,
+            },
+
+            select: {
+              id: true,
+            },
+          });
+
         const match =
           await prisma.match.upsert({
             where: {
-              externalId: fixtureId,
+              externalId:
+                fixtureId,
             },
 
             update: {
               status,
 
-              kickoffAt: fixtureDate,
+              kickoffAt:
+                fixtureDate,
 
-              leagueId: league.id,
+              leagueId:
+                league.id,
 
               homeTeamId:
                 homeTeam.id,
@@ -406,9 +597,11 @@ async function syncMatches(req: NextRequest) {
             },
 
             create: {
-              externalId: fixtureId,
+              externalId:
+                fixtureId,
 
-              leagueId: league.id,
+              leagueId:
+                league.id,
 
               homeTeamId:
                 homeTeam.id,
@@ -416,7 +609,8 @@ async function syncMatches(req: NextRequest) {
               awayTeamId:
                 awayTeam.id,
 
-              kickoffAt: fixtureDate,
+              kickoffAt:
+                fixtureDate,
 
               status,
 
@@ -440,11 +634,27 @@ async function syncMatches(req: NextRequest) {
           );
         }
 
-        // ====================================
-        // 5.6 UNIQUEMENT LES MATCHS À VENIR
-        // ====================================
+        /*
+         * ====================================================
+         * 5.8 MATCH À VENIR
+         * ====================================================
+         *
+         * On accepte plusieurs statuts utilisés par
+         * API-Football pour les matchs programmés.
+         */
 
-        if (status !== "NS") {
+        const upcomingStatuses =
+          new Set([
+            "NS",
+            "TBD",
+            "PST",
+          ]);
+
+        if (
+          !upcomingStatuses.has(
+            status
+          )
+        ) {
           nonNsMatches++;
 
           console.log(
@@ -454,32 +664,17 @@ async function syncMatches(req: NextRequest) {
           continue;
         }
 
-        // ====================================
-        // 5.7 DÉBUT PRÉDICTION
-        // ====================================
+        /*
+         * ====================================================
+         * 5.9 STATISTIQUES
+         * ====================================================
+         */
 
-        console.log(
-          "===================================="
-        );
+        let homeStatsRaw: any =
+          null;
 
-        console.log(
-          "🤖 DÉBUT PRÉDICTION"
-        );
-
-        console.log(
-          `🤖 ${homeName} - ${awayName}`
-        );
-
-        console.log(
-          "===================================="
-        );
-
-        // ====================================
-        // 5.8 RÉCUPÉRATION STATISTIQUES
-        // ====================================
-
-        let homeStatsRaw: any;
-        let awayStatsRaw: any;
+        let awayStatsRaw: any =
+          null;
 
         try {
           console.log(
@@ -493,23 +688,24 @@ async function syncMatches(req: NextRequest) {
           [
             homeStatsRaw,
             awayStatsRaw,
-          ] = await Promise.all([
-            fetchTeamStatistics(
-              Number(
-                fixture.teams.home.id
+          ] =
+            await Promise.all([
+              fetchTeamStatistics(
+                Number(
+                  fixture.teams.home.id
+                ),
+                leagueId,
+                season
               ),
-              leagueId,
-              season
-            ),
 
-            fetchTeamStatistics(
-              Number(
-                fixture.teams.away.id
+              fetchTeamStatistics(
+                Number(
+                  fixture.teams.away.id
+                ),
+                leagueId,
+                season
               ),
-              leagueId,
-              season
-            ),
-          ]);
+            ]);
 
           console.log(
             "✅ Statistiques récupérées"
@@ -517,68 +713,65 @@ async function syncMatches(req: NextRequest) {
         } catch (error) {
           statisticsErrors++;
 
-          console.error(
-            "❌ ERREUR STATISTIQUES"
+          console.warn(
+            "⚠️ Statistiques indisponibles"
           );
 
-          console.error(
+          console.warn(
             `⚽ ${homeName} - ${awayName}`
           );
 
-          console.error(error);
-
-          continue;
+          console.warn(error);
         }
 
-        // ====================================
-        // 5.9 CONVERSION STATISTIQUES
-        // ====================================
+        /*
+         * ====================================================
+         * 5.10 CONVERSION STATS
+         * ====================================================
+         */
 
         let homeStats: ReturnType<
           typeof parseTeamAverages
-        >;
+        > | null = null;
 
         let awayStats: ReturnType<
           typeof parseTeamAverages
-        >;
+        > | null = null;
 
         try {
-          homeStats =
-            parseTeamAverages(
-              homeStatsRaw
-            );
+          if (
+            homeStatsRaw &&
+            awayStatsRaw
+          ) {
+            homeStats =
+              parseTeamAverages(
+                homeStatsRaw
+              );
 
-          awayStats =
-            parseTeamAverages(
-              awayStatsRaw
-            );
+            awayStats =
+              parseTeamAverages(
+                awayStatsRaw
+              );
+          }
         } catch (error) {
           statisticsErrors++;
 
-          console.error(
-            "❌ ERREUR CONVERSION STATS"
+          console.warn(
+            "⚠️ Erreur conversion statistiques"
           );
 
-          console.error(error);
-
-          continue;
+          console.warn(error);
         }
 
-        console.log(
-          "📈 Stats domicile :",
-          homeStats
-        );
+        /*
+         * ====================================================
+         * 5.11 VALIDATION STATS
+         * ====================================================
+         */
 
-        console.log(
-          "📈 Stats extérieur :",
-          awayStats
-        );
-
-        // ====================================
-        // 5.10 VALIDATION DES STATS
-        // ====================================
-
-        const statsAreValid =
+        const validStats =
+          homeStats &&
+          awayStats &&
           Number.isFinite(
             homeStats.goalsScoredAvgHome
           ) &&
@@ -590,39 +783,60 @@ async function syncMatches(req: NextRequest) {
           ) &&
           Number.isFinite(
             homeStats.goalsConcededAvgAway
-          ) &&
-          homeStats.goalsScoredAvgHome >= 0 &&
-          homeStats.goalsConcededAvgHome >= 0 &&
-          homeStats.goalsScoredAvgAway >= 0 &&
-          homeStats.goalsConcededAvgAway >= 0;
-
-        if (!statsAreValid) {
-          statisticsErrors++;
-
-          console.error(
-            "❌ Statistiques invalides"
           );
 
-          continue;
+        /*
+         * ====================================================
+         * 5.12 FALLBACK
+         * ====================================================
+         *
+         * Si API-Football ne fournit pas les statistiques,
+         * on utilise des valeurs neutres raisonnables.
+         *
+         * Cela permet au moteur de continuer à produire
+         * une prédiction au lieu de perdre le match.
+         */
+
+        if (!validStats) {
+          fallbackStatisticsUsed++;
+
+          console.warn(
+            "⚠️ Utilisation des statistiques de secours"
+          );
+
+          homeStats = {
+            goalsScoredAvgHome: 1.4,
+            goalsConcededAvgHome: 1.1,
+            goalsScoredAvgAway: 1.1,
+            goalsConcededAvgAway: 1.2,
+            matchesPlayed: 0,
+          };
+
+          awayStats = {
+            goalsScoredAvgHome: 1.3,
+            goalsConcededAvgHome: 1.2,
+            goalsScoredAvgAway: 1.1,
+            goalsConcededAvgAway: 1.2,
+            matchesPlayed: 0,
+          };
         }
 
-        // ====================================
-        // 5.11 MOYENNES DE LA LIGUE
-        // ====================================
+        /*
+         * ====================================================
+         * 5.13 MOYENNES DE LA LIGUE
+         * ====================================================
+         */
 
         const leagueAverages = {
           avgGoalsHome: 1.4,
           avgGoalsAway: 1.1,
         };
 
-        console.log(
-          "📊 Moyennes ligue :",
-          leagueAverages
-        );
-
-        // ====================================
-        // 5.12 CALCUL PRÉDICTION
-        // ====================================
+        /*
+         * ====================================================
+         * 5.14 PRÉDICTION
+         * ====================================================
+         */
 
         console.log(
           "🧠 Calcul prédiction..."
@@ -636,45 +850,43 @@ async function syncMatches(req: NextRequest) {
           );
 
         console.log(
-          "✅ Prédiction calculée"
-        );
-
-        console.log(
-          "🎯 Résultat :",
-          result
-        );
-
-        console.log(
           `🎯 Score prévu : ${result.predictedHomeGoals}-${result.predictedAwayGoals}`
         );
 
         console.log(
-          `📊 Probabilité score exact : ${result.exactScoreProb}`
+          `🎯 Score exact : ${(
+            result.exactScoreProb * 100
+          ).toFixed(2)}%`
         );
 
         console.log(
-          `🏠 Victoire domicile : ${result.homeWinProb}`
+          `🏠 Victoire domicile : ${(
+            result.homeWinProb * 100
+          ).toFixed(2)}%`
         );
 
         console.log(
-          `🤝 Nul : ${result.drawProb}`
+          `🤝 Nul : ${(
+            result.drawProb * 100
+          ).toFixed(2)}%`
         );
 
         console.log(
-          `✈️ Victoire extérieur : ${result.awayWinProb}`
+          `✈️ Victoire extérieur : ${(
+            result.awayWinProb * 100
+          ).toFixed(2)}%`
         );
 
-        // ====================================
-        // 5.13 ENREGISTREMENT PRÉDICTION
-        // ====================================
-
-        console.log(
-          "💾 Enregistrement prédiction..."
-        );
+        /*
+         * ====================================================
+         * 5.15 ENREGISTREMENT
+         * ====================================================
+         */
 
         await prisma.prediction.upsert({
           where: {
-            matchId: match.id,
+            matchId:
+              match.id,
           },
 
           update: {
@@ -707,7 +919,8 @@ async function syncMatches(req: NextRequest) {
           },
 
           create: {
-            matchId: match.id,
+            matchId:
+              match.id,
 
             predictedHomeGoals:
               result.predictedHomeGoals,
@@ -738,47 +951,7 @@ async function syncMatches(req: NextRequest) {
         predictionsGenerated++;
 
         console.log(
-          "===================================="
-        );
-
-        console.log(
           "✅ PRÉDICTION ENREGISTRÉE"
-        );
-
-        console.log(
-          `⚽ ${homeName} - ${awayName}`
-        );
-
-        console.log(
-          `🎯 Score : ${result.predictedHomeGoals}-${result.predictedAwayGoals}`
-        );
-
-        console.log(
-          `🎯 Score exact : ${(
-            result.exactScoreProb * 100
-          ).toFixed(2)}%`
-        );
-
-        console.log(
-          `🏠 Victoire domicile : ${(
-            result.homeWinProb * 100
-          ).toFixed(2)}%`
-        );
-
-        console.log(
-          `🤝 Nul : ${(
-            result.drawProb * 100
-          ).toFixed(2)}%`
-        );
-
-        console.log(
-          `✈️ Victoire extérieur : ${(
-            result.awayWinProb * 100
-          ).toFixed(2)}%`
-        );
-
-        console.log(
-          "===================================="
         );
       } catch (error) {
         predictionErrors++;
@@ -799,14 +972,14 @@ async function syncMatches(req: NextRequest) {
       }
     }
 
-    // ========================================
-    // 6. RÉSUMÉ
-    // ========================================
+    /*
+     * ========================================================
+     * 6. RÉSUMÉ
+     * ========================================================
+     */
 
     const duration =
       Date.now() - startTime;
-
-    console.log("");
 
     console.log(
       "===================================="
@@ -849,7 +1022,11 @@ async function syncMatches(req: NextRequest) {
     );
 
     console.log(
-      `⏭️ Matchs non NS : ${nonNsMatches}`
+      `🛟 Fallback statistiques : ${fallbackStatisticsUsed}`
+    );
+
+    console.log(
+      `⏭️ Matchs non programmés : ${nonNsMatches}`
     );
 
     console.log(
@@ -864,9 +1041,11 @@ async function syncMatches(req: NextRequest) {
       "===================================="
     );
 
-    // ========================================
-    // 7. RÉPONSE JSON
-    // ========================================
+    /*
+     * ========================================================
+     * 7. RÉPONSE
+     * ========================================================
+     */
 
     return NextResponse.json({
       ok: true,
@@ -889,21 +1068,22 @@ async function syncMatches(req: NextRequest) {
 
       statisticsErrors,
 
+      fallbackStatisticsUsed,
+
       nonNsMatches,
 
       skippedFixtures,
 
-      durationMs: duration,
+      durationMs:
+        duration,
     });
   } catch (error) {
-    console.error("");
-
     console.error(
       "===================================="
     );
 
     console.error(
-      "❌ ERREUR GÉNÉRALE /api/matches/sync"
+      "❌ ERREUR GÉNÉRALE"
     );
 
     console.error(
@@ -928,23 +1108,27 @@ async function syncMatches(req: NextRequest) {
   }
 }
 
-// ========================================
-// GET — VERCEL CRON
-// ========================================
+/*
+ * ============================================================
+ * GET — VERCEL CRON OU TEST
+ * ============================================================
+ */
 
 export async function GET(
   req: NextRequest
 ) {
   console.log(
-    "⏰ Vercel Cron → GET /api/matches/sync"
+    "⏰ GET /api/matches/sync"
   );
 
   return syncMatches(req);
 }
 
-// ========================================
-// POST — TEST MANUEL
-// ========================================
+/*
+ * ============================================================
+ * POST — TEST MANUEL
+ * ============================================================
+ */
 
 export async function POST(
   req: NextRequest
@@ -955,3 +1139,5 @@ export async function POST(
 
   return syncMatches(req);
 }
+```
+
