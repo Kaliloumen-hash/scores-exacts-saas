@@ -57,23 +57,25 @@ async function fetchJson<T = any>(url: string): Promise<T> {
     Object.keys(data.errors).length > 0
   ) {
     const errors = data.errors;
+    const errorText = JSON.stringify(errors);
 
     console.error(
       "❌ Erreurs API-Football:",
-      JSON.stringify(errors)
+      errorText
     );
 
-    const errorText = JSON.stringify(errors);
-
     const isDateRestriction =
+      errorText.includes(
+        "free plans do not have access to this date"
+      ) ||
+      errorText.includes(
+        "Free plans do not have access to this date"
+      ) ||
       errorText.includes(
         "Les forfaits gratuits n’ont pas accès à cette date"
       ) ||
       errorText.includes(
         "Les forfaits gratuits n'ont pas accès à cette date"
-      ) ||
-      errorText.includes(
-        "free plans do not have access to this date"
       );
 
     if (isDateRestriction) {
@@ -127,7 +129,7 @@ export async function fetchFixturesByDate(
       ApiFootballDateRestrictionError
     ) {
       console.warn(
-        `⚠️ Date ${date} non accessible avec le forfait API actuel.`
+        `⚠️ ${date} n'est pas accessible avec le forfait API actuel.`
       );
 
       return [];
@@ -140,9 +142,8 @@ export async function fetchFixturesByDate(
 /**
  * Récupère les matchs sur une période.
  *
- * IMPORTANT :
- * Cette fonction est bien exportée.
- * C'est elle que route.ts importe.
+ * La fonction continue même si une date
+ * n'est pas disponible avec le forfait API.
  */
 export async function fetchFixturesByDateRange(
   fromDate: string,
@@ -195,20 +196,23 @@ export async function fetchFixturesByDateRange(
       const dailyFixtures =
         await fetchFixturesByDate(date);
 
-      fixtures.push(
-        ...dailyFixtures
-      );
+      if (dailyFixtures.length > 0) {
+        fixtures.push(
+          ...dailyFixtures
+        );
+      }
 
       console.log(
         `✅ ${date} : ${dailyFixtures.length} match(s)`
       );
     } catch (error) {
       console.error(
-        `❌ Erreur récupération ${date}:`,
-        error
+        `❌ Erreur récupération ${date}:`
       );
 
-      // On continue avec le jour suivant.
+      console.error(error);
+
+      // On continue avec la date suivante.
       continue;
     }
   }
@@ -218,7 +222,7 @@ export async function fetchFixturesByDateRange(
   );
 
   console.log(
-    `⚽ Total : ${fixtures.length} match(s)`
+    `⚽ TOTAL : ${fixtures.length} match(s)`
   );
 
   console.log(
@@ -309,10 +313,14 @@ export function parseTeamAverages(
     rawStats?.fixtures?.played;
 
   const homePlayed =
-    Number(played?.home ?? 0);
+    Number(
+      played?.home ?? 0
+    );
 
   const awayPlayed =
-    Number(played?.away ?? 0);
+    Number(
+      played?.away ?? 0
+    );
 
   const goalsScoredAvgHome =
     Number(
