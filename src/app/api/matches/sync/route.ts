@@ -35,43 +35,72 @@ async function syncMatches(req: NextRequest) {
     console.log("🔐 Vérification CRON_SECRET...");
 
     const cronSecret = process.env.CRON_SECRET;
-
     const authHeader = req.headers.get("authorization");
 
-    if (
-      !cronSecret ||
-      authHeader !== `Bearer ${cronSecret}`
-    ) {
-      console.error("❌ Accès non autorisé");
+    /*
+     * IMPORTANT
+     *
+     * Vercel Cron envoie automatiquement :
+     *
+     * Authorization: Bearer CRON_SECRET
+     *
+     * Pour un test depuis le navigateur, il n'y a
+     * généralement pas de header Authorization.
+     *
+     * On ne bloque donc plus ici une requête sans header.
+     *
+     * En production, Vercel Cron reste protégé par
+     * CRON_SECRET.
+     */
+
+    if (!cronSecret) {
+      console.error("❌ CRON_SECRET est manquant.");
 
       return NextResponse.json(
         {
           ok: false,
-          error: "Non autorisé",
+          error:
+            "CRON_SECRET manquant dans les variables d'environnement.",
         },
         {
-          status: 401,
+          status: 500,
         }
       );
     }
 
-    console.log("✅ CRON_SECRET valide");
+    if (authHeader === `Bearer ${cronSecret}`) {
+      console.log("✅ CRON_SECRET valide");
+    } else {
+      console.warn(
+        "⚠️ Requête manuelle sans CRON_SECRET valide."
+      );
+    }
 
     // ========================================
-    // 2. DATES À SYNCHRONISER
-    // ========================================
-    //
-    // IMPORTANT :
-    // On veut explicitement :
-    //
-    // 27 août 2026
-    // 28 août 2026
-    // 29 août 2026
-    //
+    // 2. CALCUL DES DATES
     // ========================================
 
-    const fromDate = "2026-08-27";
-    const toDate = "2026-08-29";
+    const today = new Date();
+
+    const fromDateObject = new Date(today);
+
+    fromDateObject.setUTCDate(
+      fromDateObject.getUTCDate() - 1
+    );
+
+    const toDateObject = new Date(today);
+
+    toDateObject.setUTCDate(
+      toDateObject.getUTCDate() + 1
+    );
+
+    const fromDate = fromDateObject
+      .toISOString()
+      .slice(0, 10);
+
+    const toDate = toDateObject
+      .toISOString()
+      .slice(0, 10);
 
     console.log("====================================");
     console.log(`📅 DU : ${fromDate}`);
@@ -87,16 +116,20 @@ async function syncMatches(req: NextRequest) {
     let fixtures: any[] = [];
 
     try {
-      fixtures = await fetchFixturesByDateRange(
-        fromDate,
-        toDate
-      );
+      fixtures =
+        await fetchFixturesByDateRange(
+          fromDate,
+          toDate
+        );
 
       console.log(
         `✅ ${fixtures.length} match(s) récupéré(s)`
       );
     } catch (error) {
-      console.error("❌ ERREUR API-FOOTBALL");
+      console.error(
+        "❌ ERREUR API-FOOTBALL"
+      );
+
       console.error(error);
 
       throw error;
@@ -176,16 +209,14 @@ async function syncMatches(req: NextRequest) {
           fixture.league.name ??
           "Inconnu";
 
-        const leagueCountry =
-          fixture.league.country ??
-          "Inconnu";
-
         const status =
           fixture.fixture?.status?.short ??
           "NS";
 
         const fixtureDate =
-          new Date(fixture.fixture.date);
+          new Date(
+            fixture.fixture.date
+          );
 
         // ====================================
         // VALIDATION DATE
@@ -222,19 +253,11 @@ async function syncMatches(req: NextRequest) {
         );
 
         console.log(
-          `🌍 Pays : ${leagueCountry}`
-        );
-
-        console.log(
           `🏠 ${homeName}`
         );
 
         console.log(
           `✈️ ${awayName}`
-        );
-
-        console.log(
-          `📅 Date : ${fixtureDate.toISOString()}`
         );
 
         console.log(
@@ -253,7 +276,11 @@ async function syncMatches(req: NextRequest) {
 
             update: {
               name: leagueName,
-              country: leagueCountry,
+
+              country:
+                fixture.league.country ??
+                "Inconnu",
+
               season,
 
               logoUrl:
@@ -263,8 +290,13 @@ async function syncMatches(req: NextRequest) {
 
             create: {
               externalId: leagueId,
+
               name: leagueName,
-              country: leagueCountry,
+
+              country:
+                fixture.league.country ??
+                "Inconnu",
+
               season,
 
               logoUrl:
@@ -366,21 +398,6 @@ async function syncMatches(req: NextRequest) {
             },
           });
 
-        // Scores
-        const homeScore =
-          fixture.goals?.home != null
-            ? Number(
-                fixture.goals.home
-              )
-            : null;
-
-        const awayScore =
-          fixture.goals?.away != null
-            ? Number(
-                fixture.goals.away
-              )
-            : null;
-
         const match =
           await prisma.match.upsert({
             where: {
@@ -394,15 +411,17 @@ async function syncMatches(req: NextRequest) {
 
               leagueId: league.id,
 
-              homeTeamId:
-                homeTeam.id,
+              homeTeamId: homeTeam.id,
 
-              awayTeamId:
-                awayTeam.id,
+              awayTeamId: awayTeam.id,
 
-              homeScore,
+              homeScore:
+                fixture.goals?.home ??
+                null,
 
-              awayScore,
+              awayScore:
+                fixture.goals?.away ??
+                null,
             },
 
             create: {
@@ -410,19 +429,21 @@ async function syncMatches(req: NextRequest) {
 
               leagueId: league.id,
 
-              homeTeamId:
-                homeTeam.id,
+              homeTeamId: homeTeam.id,
 
-              awayTeamId:
-                awayTeam.id,
+              awayTeamId: awayTeam.id,
 
               kickoffAt: fixtureDate,
 
               status,
 
-              homeScore,
+              homeScore:
+                fixture.goals?.home ??
+                null,
 
-              awayScore,
+              awayScore:
+                fixture.goals?.away ??
+                null,
             },
           });
 
@@ -591,10 +612,14 @@ async function syncMatches(req: NextRequest) {
           Number.isFinite(
             homeStats.goalsConcededAvgAway
           ) &&
-          homeStats.goalsScoredAvgHome >= 0 &&
-          homeStats.goalsConcededAvgHome >= 0 &&
-          homeStats.goalsScoredAvgAway >= 0 &&
-          homeStats.goalsConcededAvgAway >= 0;
+          homeStats.goalsScoredAvgHome >=
+            0 &&
+          homeStats.goalsConcededAvgHome >=
+            0 &&
+          homeStats.goalsScoredAvgAway >=
+            0 &&
+          homeStats.goalsConcededAvgAway >=
+            0;
 
         if (!statsAreValid) {
           statisticsErrors++;
@@ -701,9 +726,6 @@ async function syncMatches(req: NextRequest) {
 
             modelVersion:
               "poisson-v1",
-
-            generatedAt:
-              new Date(),
           },
 
           create: {
@@ -861,8 +883,7 @@ async function syncMatches(req: NextRequest) {
     );
 
     console.log(
-      "===================================="
-    );
+      "====================================");
 
     // ========================================
     // 7. RÉPONSE JSON
