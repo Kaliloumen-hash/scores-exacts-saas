@@ -17,7 +17,7 @@ export const maxDuration = 300;
 /**
  * Synchronisation des matchs + génération des prédictions.
  *
- * GET  : utilisé par Vercel Cron
+ * GET  : Vercel Cron
  * POST : test manuel
  */
 async function syncMatches(req: NextRequest) {
@@ -37,22 +37,6 @@ async function syncMatches(req: NextRequest) {
     const cronSecret = process.env.CRON_SECRET;
     const authHeader = req.headers.get("authorization");
 
-    /*
-     * IMPORTANT
-     *
-     * Vercel Cron envoie automatiquement :
-     *
-     * Authorization: Bearer CRON_SECRET
-     *
-     * Pour un test depuis le navigateur, il n'y a
-     * généralement pas de header Authorization.
-     *
-     * On ne bloque donc plus ici une requête sans header.
-     *
-     * En production, Vercel Cron reste protégé par
-     * CRON_SECRET.
-     */
-
     if (!cronSecret) {
       console.error("❌ CRON_SECRET est manquant.");
 
@@ -62,9 +46,7 @@ async function syncMatches(req: NextRequest) {
           error:
             "CRON_SECRET manquant dans les variables d'environnement.",
         },
-        {
-          status: 500,
-        }
+        { status: 500 }
       );
     }
 
@@ -77,30 +59,21 @@ async function syncMatches(req: NextRequest) {
     }
 
     // ========================================
-    // 2. CALCUL DES DATES
+    // 2. DATES
     // ========================================
 
-    const today = new Date();
+    /**
+     * IMPORTANT
+     *
+     * On veut récupérer précisément :
+     *
+     * 27 août 2026
+     * 28 août 2026
+     * 29 août 2026
+     */
 
-    const fromDateObject = new Date(today);
-
-    fromDateObject.setUTCDate(
-      fromDateObject.getUTCDate() - 1
-    );
-
-    const toDateObject = new Date(today);
-
-    toDateObject.setUTCDate(
-      toDateObject.getUTCDate() + 1
-    );
-
-    const fromDate = fromDateObject
-      .toISOString()
-      .slice(0, 10);
-
-    const toDate = toDateObject
-      .toISOString()
-      .slice(0, 10);
+    const fromDate = "2026-08-27";
+    const toDate = "2026-08-29";
 
     console.log("====================================");
     console.log(`📅 DU : ${fromDate}`);
@@ -219,7 +192,7 @@ async function syncMatches(req: NextRequest) {
           );
 
         // ====================================
-        // VALIDATION DATE
+        // 5.2 VALIDATION DATE
         // ====================================
 
         if (
@@ -265,7 +238,7 @@ async function syncMatches(req: NextRequest) {
         );
 
         // ====================================
-        // 5.2 LIGUE
+        // 5.3 LIGUE
         // ====================================
 
         const league =
@@ -306,7 +279,7 @@ async function syncMatches(req: NextRequest) {
           });
 
         // ====================================
-        // 5.3 ÉQUIPE DOMICILE
+        // 5.4 ÉQUIPE DOMICILE
         // ====================================
 
         const homeTeam =
@@ -345,7 +318,7 @@ async function syncMatches(req: NextRequest) {
           });
 
         // ====================================
-        // 5.4 ÉQUIPE EXTÉRIEURE
+        // 5.5 ÉQUIPE EXTÉRIEURE
         // ====================================
 
         const awayTeam =
@@ -384,7 +357,7 @@ async function syncMatches(req: NextRequest) {
           });
 
         // ====================================
-        // 5.5 MATCH
+        // 5.6 MATCH
         // ====================================
 
         const existingMatch =
@@ -462,7 +435,7 @@ async function syncMatches(req: NextRequest) {
         }
 
         // ====================================
-        // 5.6 UNIQUEMENT LES MATCHS À VENIR
+        // 5.7 MATCH À VENIR UNIQUEMENT
         // ====================================
 
         if (status !== "NS") {
@@ -476,7 +449,7 @@ async function syncMatches(req: NextRequest) {
         }
 
         // ====================================
-        // 5.7 DÉBUT PRÉDICTION
+        // 5.8 STATISTIQUES
         // ====================================
 
         console.log(
@@ -494,10 +467,6 @@ async function syncMatches(req: NextRequest) {
         console.log(
           "===================================="
         );
-
-        // ====================================
-        // 5.8 RÉCUPÉRATION STATISTIQUES
-        // ====================================
 
         let homeStatsRaw: any;
         let awayStatsRaw: any;
@@ -552,7 +521,7 @@ async function syncMatches(req: NextRequest) {
         }
 
         // ====================================
-        // 5.9 CONVERSION STATISTIQUES
+        // 5.9 CONVERSION STATS
         // ====================================
 
         let homeStats: ReturnType<
@@ -596,7 +565,7 @@ async function syncMatches(req: NextRequest) {
         );
 
         // ====================================
-        // 5.10 VALIDATION DES STATS
+        // 5.10 VALIDATION STATS
         // ====================================
 
         const statsAreValid =
@@ -632,7 +601,7 @@ async function syncMatches(req: NextRequest) {
         }
 
         // ====================================
-        // 5.11 MOYENNES DE LA LIGUE
+        // 5.11 MOYENNES LIGUE
         // ====================================
 
         const leagueAverages = {
@@ -646,7 +615,7 @@ async function syncMatches(req: NextRequest) {
         );
 
         // ====================================
-        // 5.12 CALCUL PRÉDICTION
+        // 5.12 PRÉDICTION
         // ====================================
 
         console.log(
@@ -690,7 +659,7 @@ async function syncMatches(req: NextRequest) {
         );
 
         // ====================================
-        // 5.13 ENREGISTREMENT PRÉDICTION
+        // 5.13 ENREGISTREMENT
         // ====================================
 
         console.log(
@@ -883,7 +852,8 @@ async function syncMatches(req: NextRequest) {
     );
 
     console.log(
-      "====================================");
+      "===================================="
+    );
 
     // ========================================
     // 7. RÉPONSE JSON
@@ -943,36 +913,4 @@ async function syncMatches(req: NextRequest) {
             : "Erreur inconnue",
       },
       {
-        status: 500,
-      }
-    );
-  }
-}
-
-// ========================================
-// GET — VERCEL CRON
-// ========================================
-
-export async function GET(
-  req: NextRequest
-) {
-  console.log(
-    "⏰ Vercel Cron → GET /api/matches/sync"
-  );
-
-  return syncMatches(req);
-}
-
-// ========================================
-// POST — TEST MANUEL
-// ========================================
-
-export async function POST(
-  req: NextRequest
-) {
-  console.log(
-    "🔄 POST /api/matches/sync"
-  );
-
-  return syncMatches(req);
-}
+       
