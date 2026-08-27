@@ -1,44 +1,28 @@
-import { NextRequest, NextResponse } from "next/server";
+```typescript
+import { NextResponse } from "next/server";
+
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-function isAuthorized(req: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
+/**
+ * API PUBLIQUE DU DASHBOARD
+ *
+ * IMPORTANT :
+ * - Aucun CRON_SECRET ici.
+ * - Aucun secret n'est envoyé au navigateur.
+ * - Le CRON_SECRET reste uniquement dans /api/matches/sync.
+ *
+ * Cette route sert uniquement à afficher les matchs
+ * et leurs prédictions dans le dashboard.
+ */
 
-  if (!secret) {
-    console.error("❌ CRON_SECRET est manquant");
-    return false;
-  }
-
-  const authorization = req.headers.get("authorization");
-
-  return authorization === `Bearer ${secret}`;
-}
-
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
-    // ========================================
-    // SÉCURITÉ
-    // ========================================
-
-    if (!isAuthorized(req)) {
-      console.error("❌ Accès non autorisé /api/matches");
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Non autorisé",
-        },
-        {
-          status: 401,
-        }
-      );
-    }
-
-    // ========================================
-    // RÉCUPÉRATION DES MATCHS
-    // ========================================
+    console.log("====================================");
+    console.log("⚽ GET /api/matches");
+    console.log("====================================");
 
     const matches = await prisma.match.findMany({
       orderBy: {
@@ -53,36 +37,42 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    // ========================================
-    // FORMATAGE
-    // ========================================
-
     const formattedMatches = matches.map((match) => ({
       id: match.id,
+
       externalId: match.externalId,
 
       kickoffAt: match.kickoffAt,
+
       status: match.status,
 
       homeScore: match.homeScore,
+
       awayScore: match.awayScore,
 
       league: {
         id: match.league.id,
+
         name: match.league.name,
+
         country: match.league.country,
+
         logoUrl: match.league.logoUrl,
       },
 
       homeTeam: {
         id: match.homeTeam.id,
+
         name: match.homeTeam.name,
+
         logoUrl: match.homeTeam.logoUrl,
       },
 
       awayTeam: {
         id: match.awayTeam.id,
+
         name: match.awayTeam.name,
+
         logoUrl: match.awayTeam.logoUrl,
       },
 
@@ -119,23 +109,51 @@ export async function GET(req: NextRequest) {
     }));
 
     console.log(
-      `✅ /api/matches : ${formattedMatches.length} match(s)`
+      `✅ ${formattedMatches.length} match(s) envoyé(s) au dashboard`
     );
 
-    // ========================================
-    // RÉPONSE
-    // ========================================
+    const predictionsCount =
+      formattedMatches.filter(
+        (match) => match.prediction !== null
+      ).length;
 
-    return NextResponse.json({
-      ok: true,
-      matches: formattedMatches,
-    });
+    console.log(
+      `🤖 ${predictionsCount} prédiction(s) disponible(s)`
+    );
+
+    return NextResponse.json(
+      {
+        ok: true,
+
+        count: formattedMatches.length,
+
+        predictionsCount,
+
+        matches: formattedMatches,
+      },
+      {
+        status: 200,
+
+        headers: {
+          "Cache-Control":
+            "no-store, no-cache, must-revalidate, proxy-revalidate",
+
+          Pragma: "no-cache",
+
+          Expires: "0",
+        },
+      }
+    );
   } catch (error) {
+    console.error("====================================");
+
     console.error(
-      "❌ Erreur /api/matches"
+      "❌ ERREUR GET /api/matches"
     );
 
     console.error(error);
+
+    console.error("====================================");
 
     return NextResponse.json(
       {
@@ -152,3 +170,4 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+```
