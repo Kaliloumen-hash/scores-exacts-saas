@@ -5,249 +5,126 @@ import { prisma } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-/**
- * ============================================================
- * /api/matches
- * ============================================================
- *
- * Matchs affichés :
- *
- * 26 août 2026
- * 27 août 2026
- * 28 août 2026
- *
- * Le 25 et le 29 août sont exclus.
- *
- * Cette route est une route de LECTURE.
- * Elle ne nécessite PAS CRON_SECRET.
- * ============================================================
- */
+const FROM_DATE = new Date("2026-08-26T00:00:00.000Z");
+const TO_DATE = new Date("2026-08-29T00:00:00.000Z");
 
 export async function GET(_req: NextRequest) {
-  const startTime = Date.now();
-
   try {
-    console.log("====================================");
-    console.log("⚽ GET /api/matches");
-    console.log("====================================");
-
-    // ----------------------------------------------------------
-    // PÉRIODE : 26 → 28 AOÛT 2026
-    // ----------------------------------------------------------
-    //
-    // gte = 26 août 00:00 UTC
-    // lt  = 29 août 00:00 UTC
-    //
-    // Cela inclut entièrement :
-    // 26 août
-    // 27 août
-    // 28 août
-    //
-    // et exclut :
-    // 25 août
-    // 29 août
-    // ----------------------------------------------------------
-
-    const fromDate = new Date(
-      "2026-08-26T00:00:00.000Z"
-    );
-
-    const toDate = new Date(
-      "2026-08-29T00:00:00.000Z"
-    );
-
-    console.log(
-      `📅 Du ${fromDate.toISOString()}`
-    );
-
-    console.log(
-      `📅 Au ${toDate.toISOString()}`
-    );
-
-    // ----------------------------------------------------------
-    // RÉCUPÉRATION DES MATCHS
-    // ----------------------------------------------------------
+    console.log("GET /api/matches");
 
     const matches = await prisma.match.findMany({
       where: {
         kickoffAt: {
-          gte: fromDate,
-          lt: toDate,
+          gte: FROM_DATE,
+          lt: TO_DATE,
         },
       },
-
       include: {
         homeTeam: true,
         awayTeam: true,
         league: true,
         prediction: true,
       },
-
       orderBy: {
         kickoffAt: "asc",
       },
     });
 
-    console.log(
-      `⚽ ${matches.length} match(s) trouvé(s)`
-    );
+    const formattedMatches = matches.map((match) => {
+      let prediction = null;
 
-    // ----------------------------------------------------------
-    // FORMATAGE
-    // ----------------------------------------------------------
+      if (match.prediction) {
+        prediction = {
+          predictedHomeGoals:
+            match.prediction.predictedHomeGoals,
 
-    const formattedMatches = matches.map(
-      (match) => {
-        const prediction =
-          match.prediction;
+          predictedAwayGoals:
+            match.prediction.predictedAwayGoals,
 
-        return {
-          id: match.id,
+          exactScoreProb:
+            match.prediction.exactScoreProb,
 
-          externalId:
-            match.externalId,
+          homeWinProb:
+            match.prediction.homeWinProb,
 
-          homeTeam: {
-            id: match.homeTeam.id,
+          drawProb:
+            match.prediction.drawProb,
 
-            externalId:
-              match.homeTeam.externalId,
+          awayWinProb:
+            match.prediction.awayWinProb,
 
-            name:
-              match.homeTeam.name,
+          scoreDistribution:
+            match.prediction.scoreDistribution,
 
-            logoUrl:
-              match.homeTeam.logoUrl,
-          },
+          modelVersion:
+            match.prediction.modelVersion,
 
-          awayTeam: {
-            id: match.awayTeam.id,
-
-            externalId:
-              match.awayTeam.externalId,
-
-            name:
-              match.awayTeam.name,
-
-            logoUrl:
-              match.awayTeam.logoUrl,
-          },
-
-          league: {
-            id:
-              match.league.id,
-
-            externalId:
-              match.league.externalId,
-
-            name:
-              match.league.name,
-
-            country:
-              match.league.country,
-
-            logoUrl:
-              match.league.logoUrl,
-
-            season:
-              match.league.season,
-          },
-
-          kickoffAt:
-            match.kickoffAt,
-
-          status:
-            match.status,
-
-          homeScore:
-            match.homeScore,
-
-          awayScore:
-            match.awayScore,
-
-          prediction:
-            prediction
-              ? {
-                  predictedHomeGoals:
-                    prediction.predictedHomeGoals,
-
-                  predictedAwayGoals:
-                    prediction.predictedAwayGoals,
-
-                  exactScoreProb:
-                    prediction.exactScoreProb,
-
-                  homeWinProb:
-                    prediction.homeWinProb,
-
-                  drawProb:
-                    prediction.drawProb,
-
-                  awayWinProb:
-                    prediction.awayWinProb,
-
-                  scoreDistribution:
-                    prediction.scoreDistribution,
-
-                  modelVersion:
-                    prediction.modelVersion,
-
-                  generatedAt:
-                    prediction.generatedAt,
-                }
-              : null,
+          generatedAt:
+            match.prediction.generatedAt,
         };
       }
-    );
 
-    // ----------------------------------------------------------
-    // STATISTIQUES
-    // ----------------------------------------------------------
+      return {
+        id: match.id,
 
-    const predictionCount =
-      formattedMatches.filter(
-        (match) =>
-          match.prediction !== null
-      ).length;
+        externalId: match.externalId,
 
-    const upcomingCount =
-      formattedMatches.filter(
-        (match) =>
-          match.status === "NS"
-      ).length;
+        homeTeam: {
+          id: match.homeTeam.id,
+          externalId: match.homeTeam.externalId,
+          name: match.homeTeam.name,
+          logoUrl: match.homeTeam.logoUrl,
+        },
 
-    const finishedCount =
-      formattedMatches.filter(
-        (match) =>
-          match.status === "FT"
-      ).length;
+        awayTeam: {
+          id: match.awayTeam.id,
+          externalId: match.awayTeam.externalId,
+          name: match.awayTeam.name,
+          logoUrl: match.awayTeam.logoUrl,
+        },
 
-    const durationMs =
-      Date.now() - startTime;
+        league: {
+          id: match.league.id,
+          externalId: match.league.externalId,
+          name: match.league.name,
+          country: match.league.country,
+          logoUrl: match.league.logoUrl,
+          season: match.league.season,
+        },
+
+        kickoffAt: match.kickoffAt,
+
+        status: match.status,
+
+        homeScore: match.homeScore,
+
+        awayScore: match.awayScore,
+
+        prediction: prediction,
+      };
+    });
+
+    const predictionCount = formattedMatches.filter(
+      (match) => match.prediction !== null
+    ).length;
+
+    const upcomingCount = formattedMatches.filter(
+      (match) => match.status === "NS"
+    ).length;
+
+    const finishedCount = formattedMatches.filter(
+      (match) => match.status === "FT"
+    ).length;
 
     console.log(
-      `🤖 Prédictions : ${predictionCount}`
+      "Matchs trouvés:",
+      formattedMatches.length
     );
 
     console.log(
-      `⏳ Matchs à venir : ${upcomingCount}`
+      "Prédictions:",
+      predictionCount
     );
-
-    console.log(
-      `🏁 Matchs terminés : ${finishedCount}`
-    );
-
-    console.log(
-      `⏱️ Durée : ${durationMs} ms`
-    );
-
-    console.log("====================================");
-    console.log("✅ /api/matches OK");
-    console.log("====================================");
-
-    // ----------------------------------------------------------
-    // RÉPONSE
-    // ----------------------------------------------------------
 
     return NextResponse.json(
       {
@@ -258,26 +135,22 @@ export async function GET(_req: NextRequest) {
           to: "2026-08-28",
         },
 
-        count:
-          formattedMatches.length,
+        count: formattedMatches.length,
 
-        predictionCount,
+        predictionCount: predictionCount,
 
-        upcomingCount,
+        upcomingCount: upcomingCount,
 
-        finishedCount,
+        finishedCount: finishedCount,
 
-        durationMs,
-
-        matches:
-          formattedMatches,
+        matches: formattedMatches,
       },
       {
         status: 200,
 
         headers: {
           "Cache-Control":
-            "no-store, no-cache, must-revalidate, proxy-revalidate",
+            "no-store, no-cache, must-revalidate",
           Pragma: "no-cache",
           Expires: "0",
         },
@@ -285,30 +158,10 @@ export async function GET(_req: NextRequest) {
     );
   } catch (error) {
     console.error(
-      "===================================="
+      "ERREUR /api/matches"
     );
 
-    console.error(
-      "❌ ERREUR /api/matches"
-    );
-
-    console.error(
-      "===================================="
-    );
-
-    if (error instanceof Error) {
-      console.error(
-        "Message :",
-        error.message
-      );
-
-      console.error(
-        "Stack :",
-        error.stack
-      );
-    } else {
-      console.error(error);
-    }
+    console.error(error);
 
     return NextResponse.json(
       {
@@ -328,27 +181,10 @@ export async function GET(_req: NextRequest) {
       },
       {
         status: 500,
-        headers: {
-          "Cache-Control":
-            "no-store",
-        },
       }
     );
   }
 }
-
-/**
- * ============================================================
- * POST
- * ============================================================
- *
- * Pour éviter les erreurs côté frontend si celui-ci utilise
- * POST par erreur, on autorise également POST à effectuer
- * exactement la même lecture.
- *
- * Aucune modification de base de données.
- * ============================================================
- */
 
 export async function POST(
   req: NextRequest
