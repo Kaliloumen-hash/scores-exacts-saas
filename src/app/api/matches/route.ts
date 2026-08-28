@@ -7,79 +7,44 @@ export const revalidate = 0;
 
 export async function GET() {
   try {
-    /*
-     * ========================================
-     * DATES À AFFICHER
-     * ========================================
-     *
-     * 26 août 2026
-     * 27 août 2026
-     * 28 août 2026
-     */
-
     const fromDate = new Date("2026-08-26T00:00:00.000Z");
     const toDate = new Date("2026-08-29T00:00:00.000Z");
-
-    console.log("====================================");
-    console.log("⚽ GET /api/matches");
-    console.log("====================================");
-    console.log("📅 Du :", fromDate.toISOString());
-    console.log("📅 Au :", toDate.toISOString());
-
-    /*
-     * ========================================
-     * RÉCUPÉRATION DES MATCHS
-     * ========================================
-     */
 
     const matches = await prisma.match.findMany({
       where: {
         kickoffAt: {
           gte: fromDate,
-          lt: toDate,
-        },
+          lt: toDate
+        }
       },
-
       orderBy: {
-        kickoffAt: "asc",
+        kickoffAt: "asc"
       },
-
       include: {
         homeTeam: true,
         awayTeam: true,
         league: true,
-        prediction: true,
-      },
+        prediction: true
+      }
     });
 
-    console.log(
-      `⚽ ${matches.length} match(s) trouvé(s)`
-    );
-
-    /*
-     * ========================================
-     * FORMATAGE POUR LE FRONTEND
-     * ========================================
-     */
-
-    const formattedMatches = matches.map((match) => {
+    const result = matches.map(function (match) {
       return {
         id: match.id,
-
         externalId: match.externalId,
 
         homeTeam: {
           id: match.homeTeam.id,
           externalId: match.homeTeam.externalId,
           name: match.homeTeam.name,
-          logoUrl: match.homeTeam.logoUrl,
+          logoUrl: match.homeTeam.logoUrl
         },
 
         awayTeam: {
           id: match.awayTeam.id,
           externalId: match.awayTeam.externalId,
           name: match.awayTeam.name,
-          logoUrl: match.awayTeam.logoUrl,
+          logoUrl: match.awayTeam.logoUrl
         },
 
         league: {
@@ -88,102 +53,67 @@ export async function GET() {
           name: match.league.name,
           country: match.league.country,
           logoUrl: match.league.logoUrl,
-          season: match.league.season,
+          season: match.league.season
         },
 
         kickoffAt: match.kickoffAt,
-
         status: match.status,
-
         homeScore: match.homeScore,
-
         awayScore: match.awayScore,
 
         prediction: match.prediction
           ? {
               predictedHomeGoals:
-                match.prediction
-                  .predictedHomeGoals,
+                match.prediction.predictedHomeGoals,
 
               predictedAwayGoals:
-                match.prediction
-                  .predictedAwayGoals,
+                match.prediction.predictedAwayGoals,
 
               exactScoreProb:
-                match.prediction
-                  .exactScoreProb,
+                match.prediction.exactScoreProb,
 
               homeWinProb:
-                match.prediction
-                  .homeWinProb,
+                match.prediction.homeWinProb,
 
               drawProb:
-                match.prediction
-                  .drawProb,
+                match.prediction.drawProb,
 
               awayWinProb:
-                match.prediction
-                  .awayWinProb,
+                match.prediction.awayWinProb,
 
               scoreDistribution:
-                match.prediction
-                  .scoreDistribution,
+                match.prediction.scoreDistribution,
 
               modelVersion:
-                match.prediction
-                  .modelVersion,
+                match.prediction.modelVersion,
 
               generatedAt:
-                match.prediction
-                  .generatedAt,
+                match.prediction.generatedAt
             }
-          : null,
+          : null
       };
     });
 
-    /*
-     * ========================================
-     * RÉPONSE
-     * ========================================
-     *
-     * isPro reste false ici.
-     * L'accès Premium pourra être géré
-     * séparément par le frontend / système
-     * d'abonnement.
-     */
-
     return NextResponse.json({
       ok: true,
-
       dateRange: {
         from: "2026-08-26",
-        to: "2026-08-28",
+        to: "2026-08-28"
       },
-
-      count: formattedMatches.length,
-
-      matches: formattedMatches,
-
-      isPro: false,
+      count: result.length,
+      matches: result,
+      isPro: false
     });
   } catch (error) {
-    console.error(
-      "❌ Erreur GET /api/matches"
-    );
-
-    console.error(error);
+    console.error("Erreur API matches:", error);
 
     return NextResponse.json(
       {
         ok: false,
-
-        error:
-          error instanceof Error
-            ? error.message
-            : "Impossible de récupérer les matchs.",
+        error: "Impossible de recuperer les matchs."
       },
       {
-        status: 500,
+        status: 500
       }
     );
   }
