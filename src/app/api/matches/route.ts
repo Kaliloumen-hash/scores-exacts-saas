@@ -6,37 +6,67 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 /**
+ * ============================================================
  * /api/matches
+ * ============================================================
  *
- * Retourne UNIQUEMENT les matchs du :
+ * Matchs affichés :
+ *
  * 26 août 2026
  * 27 août 2026
  * 28 août 2026
  *
- * Les matchs du 25 et du 29 août sont exclus.
+ * Le 25 et le 29 août sont exclus.
  *
- * GET /api/matches
+ * Cette route est une route de LECTURE.
+ * Elle ne nécessite PAS CRON_SECRET.
+ * ============================================================
  */
-export async function GET(req: NextRequest) {
+
+export async function GET(_req: NextRequest) {
+  const startTime = Date.now();
+
   try {
     console.log("====================================");
     console.log("⚽ GET /api/matches");
     console.log("====================================");
 
-    // ============================================================
-    // 1. PÉRIODE AUTORISÉE
-    // ============================================================
+    // ----------------------------------------------------------
+    // PÉRIODE : 26 → 28 AOÛT 2026
+    // ----------------------------------------------------------
+    //
+    // gte = 26 août 00:00 UTC
+    // lt  = 29 août 00:00 UTC
+    //
+    // Cela inclut entièrement :
+    // 26 août
+    // 27 août
+    // 28 août
+    //
+    // et exclut :
+    // 25 août
+    // 29 août
+    // ----------------------------------------------------------
 
-    const fromDate = new Date("2026-08-26T00:00:00.000Z");
-    const toDate = new Date("2026-08-29T00:00:00.000Z");
-
-    console.log(
-      `📅 Période : ${fromDate.toISOString()} → ${toDate.toISOString()}`
+    const fromDate = new Date(
+      "2026-08-26T00:00:00.000Z"
     );
 
-    // ============================================================
-    // 2. RÉCUPÉRATION DES MATCHS
-    // ============================================================
+    const toDate = new Date(
+      "2026-08-29T00:00:00.000Z"
+    );
+
+    console.log(
+      `📅 Du ${fromDate.toISOString()}`
+    );
+
+    console.log(
+      `📅 Au ${toDate.toISOString()}`
+    );
+
+    // ----------------------------------------------------------
+    // RÉCUPÉRATION DES MATCHS
+    // ----------------------------------------------------------
 
     const matches = await prisma.match.findMany({
       where: {
@@ -59,97 +89,131 @@ export async function GET(req: NextRequest) {
     });
 
     console.log(
-      `✅ ${matches.length} match(s) trouvé(s)`
+      `⚽ ${matches.length} match(s) trouvé(s)`
     );
 
-    // ============================================================
-    // 3. FORMATAGE POUR LE DASHBOARD
-    // ============================================================
+    // ----------------------------------------------------------
+    // FORMATAGE
+    // ----------------------------------------------------------
 
-    const formattedMatches = matches.map((match) => {
-      const prediction = match.prediction;
+    const formattedMatches = matches.map(
+      (match) => {
+        const prediction =
+          match.prediction;
 
-      return {
-        id: match.id,
+        return {
+          id: match.id,
 
-        externalId: match.externalId,
+          externalId:
+            match.externalId,
 
-        homeTeam: {
-          id: match.homeTeam.id,
-          externalId: match.homeTeam.externalId,
-          name: match.homeTeam.name,
-          logoUrl: match.homeTeam.logoUrl,
-        },
+          homeTeam: {
+            id: match.homeTeam.id,
 
-        awayTeam: {
-          id: match.awayTeam.id,
-          externalId: match.awayTeam.externalId,
-          name: match.awayTeam.name,
-          logoUrl: match.awayTeam.logoUrl,
-        },
+            externalId:
+              match.homeTeam.externalId,
 
-        league: {
-          id: match.league.id,
-          externalId: match.league.externalId,
-          name: match.league.name,
-          country: match.league.country,
-          logoUrl: match.league.logoUrl,
-          season: match.league.season,
-        },
+            name:
+              match.homeTeam.name,
 
-        kickoffAt: match.kickoffAt,
+            logoUrl:
+              match.homeTeam.logoUrl,
+          },
 
-        status: match.status,
+          awayTeam: {
+            id: match.awayTeam.id,
 
-        homeScore: match.homeScore,
+            externalId:
+              match.awayTeam.externalId,
 
-        awayScore: match.awayScore,
+            name:
+              match.awayTeam.name,
 
-        prediction: prediction
-          ? {
-              predictedHomeGoals:
-                prediction.predictedHomeGoals,
+            logoUrl:
+              match.awayTeam.logoUrl,
+          },
 
-              predictedAwayGoals:
-                prediction.predictedAwayGoals,
+          league: {
+            id:
+              match.league.id,
 
-              exactScoreProb:
-                prediction.exactScoreProb,
+            externalId:
+              match.league.externalId,
 
-              homeWinProb:
-                prediction.homeWinProb,
+            name:
+              match.league.name,
 
-              drawProb:
-                prediction.drawProb,
+            country:
+              match.league.country,
 
-              awayWinProb:
-                prediction.awayWinProb,
+            logoUrl:
+              match.league.logoUrl,
 
-              scoreDistribution:
-                prediction.scoreDistribution,
+            season:
+              match.league.season,
+          },
 
-              modelVersion:
-                prediction.modelVersion,
+          kickoffAt:
+            match.kickoffAt,
 
-              generatedAt:
-                prediction.generatedAt,
-            }
-          : null,
-      };
-    });
+          status:
+            match.status,
 
-    // ============================================================
-    // 4. INFORMATIONS POUR LE DASHBOARD
-    // ============================================================
+          homeScore:
+            match.homeScore,
+
+          awayScore:
+            match.awayScore,
+
+          prediction:
+            prediction
+              ? {
+                  predictedHomeGoals:
+                    prediction.predictedHomeGoals,
+
+                  predictedAwayGoals:
+                    prediction.predictedAwayGoals,
+
+                  exactScoreProb:
+                    prediction.exactScoreProb,
+
+                  homeWinProb:
+                    prediction.homeWinProb,
+
+                  drawProb:
+                    prediction.drawProb,
+
+                  awayWinProb:
+                    prediction.awayWinProb,
+
+                  scoreDistribution:
+                    prediction.scoreDistribution,
+
+                  modelVersion:
+                    prediction.modelVersion,
+
+                  generatedAt:
+                    prediction.generatedAt,
+                }
+              : null,
+        };
+      }
+    );
+
+    // ----------------------------------------------------------
+    // STATISTIQUES
+    // ----------------------------------------------------------
 
     const predictionCount =
       formattedMatches.filter(
-        (match) => match.prediction !== null
+        (match) =>
+          match.prediction !== null
       ).length;
 
     const upcomingCount =
       formattedMatches.filter(
-        (match) => match.status === "NS"
+        (match) =>
+          match.status === "NS"
       ).length;
 
     const finishedCount =
@@ -158,12 +222,11 @@ export async function GET(req: NextRequest) {
           match.status === "FT"
       ).length;
 
-    // ============================================================
-    // 5. RÉPONSE
-    // ============================================================
+    const durationMs =
+      Date.now() - startTime;
 
     console.log(
-      `🤖 Prédictions disponibles : ${predictionCount}`
+      `🤖 Prédictions : ${predictionCount}`
     );
 
     console.log(
@@ -174,9 +237,17 @@ export async function GET(req: NextRequest) {
       `🏁 Matchs terminés : ${finishedCount}`
     );
 
+    console.log(
+      `⏱️ Durée : ${durationMs} ms`
+    );
+
     console.log("====================================");
-    console.log("✅ /api/matches terminé");
+    console.log("✅ /api/matches OK");
     console.log("====================================");
+
+    // ----------------------------------------------------------
+    // RÉPONSE
+    // ----------------------------------------------------------
 
     return NextResponse.json(
       {
@@ -187,7 +258,8 @@ export async function GET(req: NextRequest) {
           to: "2026-08-28",
         },
 
-        count: formattedMatches.length,
+        count:
+          formattedMatches.length,
 
         predictionCount,
 
@@ -195,7 +267,10 @@ export async function GET(req: NextRequest) {
 
         finishedCount,
 
-        matches: formattedMatches,
+        durationMs,
+
+        matches:
+          formattedMatches,
       },
       {
         status: 200,
@@ -203,15 +278,37 @@ export async function GET(req: NextRequest) {
         headers: {
           "Cache-Control":
             "no-store, no-cache, must-revalidate, proxy-revalidate",
+          Pragma: "no-cache",
+          Expires: "0",
         },
       }
     );
   } catch (error) {
-    console.error("====================================");
-    console.error("❌ ERREUR /api/matches");
-    console.error("====================================");
+    console.error(
+      "===================================="
+    );
 
-    console.error(error);
+    console.error(
+      "❌ ERREUR /api/matches"
+    );
+
+    console.error(
+      "===================================="
+    );
+
+    if (error instanceof Error) {
+      console.error(
+        "Message :",
+        error.message
+      );
+
+      console.error(
+        "Stack :",
+        error.stack
+      );
+    } else {
+      console.error(error);
+    }
 
     return NextResponse.json(
       {
@@ -220,12 +317,42 @@ export async function GET(req: NextRequest) {
         error:
           error instanceof Error
             ? error.message
-            : "Erreur inconnue",
+            : "Impossible de récupérer les matchs.",
+
+        dateRange: {
+          from: "2026-08-26",
+          to: "2026-08-28",
+        },
+
+        matches: [],
       },
       {
         status: 500,
+        headers: {
+          "Cache-Control":
+            "no-store",
+        },
       }
     );
   }
+}
+
+/**
+ * ============================================================
+ * POST
+ * ============================================================
+ *
+ * Pour éviter les erreurs côté frontend si celui-ci utilise
+ * POST par erreur, on autorise également POST à effectuer
+ * exactement la même lecture.
+ *
+ * Aucune modification de base de données.
+ * ============================================================
+ */
+
+export async function POST(
+  req: NextRequest
+) {
+  return GET(req);
 }
 ```
