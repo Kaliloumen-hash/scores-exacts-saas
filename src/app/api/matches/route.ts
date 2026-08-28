@@ -1,7 +1,9 @@
 ```ts
 import { NextResponse } from "next/server";
 
-export async function GET() {
+export const dynamic = "force-dynamic";
+
+export function GET() {
   return NextResponse.json({
     ok: true,
   });
